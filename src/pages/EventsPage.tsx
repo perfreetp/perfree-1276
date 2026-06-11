@@ -18,6 +18,7 @@ import {
   AlertTriangle,
   CalendarX,
   DollarSign,
+  Gift,
   MessageSquare,
   Download,
   Timer,
@@ -242,6 +243,9 @@ function EventDetail() {
   const addLog = useAppStore((s) => s.addLog)
   const addIncident = useAppStore((s) => s.addIncident)
   const updateIncident = useAppStore((s) => s.updateIncident)
+  const addTicketSale = useAppStore((s) => s.addTicketSale)
+  const addComplementaryTicket = useAppStore((s) => s.addComplementaryTicket)
+  const addAttendance = useAppStore((s) => s.addAttendance)
 
   const [showAssignmentModal, setShowAssignmentModal] = useState(false)
   const [newAssignment, setNewAssignment] = useState({ personnelId: '', role: '' })
@@ -262,6 +266,33 @@ function EventDetail() {
     description: '',
     timestamp: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
   })
+
+  const [showTicketModal, setShowTicketModal] = useState(false)
+  const [ticketForm, setTicketForm] = useState({
+    type: 'normal' as any,
+    quantity: 1,
+    price: 180,
+    soldBy: '',
+    notes: '',
+  })
+
+  const [showCompModal, setShowCompModal] = useState(false)
+  const [compForm, setCompForm] = useState({
+    recipient: '',
+    quantity: 1,
+    reason: '',
+    issuedBy: '',
+  })
+
+  const [showAttendanceModal, setShowAttendanceModal] = useState(false)
+  const [attendanceForm, setAttendanceForm] = useState({
+    normalTickets: 0,
+    vipTickets: 0,
+    studentTickets: 0,
+    complementaryTickets: 0,
+  })
+
+  const [viewMode, setViewMode] = useState<'panel' | 'sheet'>('panel')
 
   const [showLogModal, setShowLogModal] = useState(false)
   const [logForm, setLogForm] = useState({ content: '', category: 'info' as PerformanceLog['category'] })
@@ -373,14 +404,82 @@ function EventDetail() {
 
   const handleAddIncident = () => {
     if (!incidentForm.title || !incidentForm.description || !id) return
-    addIncident({ eventId: id, timestamp: new Date().toISOString(), title: incidentForm.title, description: incidentForm.description, severity: incidentForm.severity, handled: false })
+    const now = new Date().toISOString()
+    addIncident({ eventId: id, timestamp: now, title: incidentForm.title, description: incidentForm.description, severity: incidentForm.severity, handled: false })
+    addTimelineEvent({
+      eventId: id,
+      type: 'incident',
+      timestamp: now,
+      title: `事故：${incidentForm.title}`,
+      description: incidentForm.description,
+    })
     setIncidentForm({ title: '', description: '', severity: 'minor' })
     setShowIncidentModal(false)
   }
 
+  const handleAddTicket = () => {
+    if (!id) return
+    addTicketSale({
+      eventId: id,
+      showId: event?.showId || '',
+      type: ticketForm.type as any,
+      quantity: ticketForm.quantity,
+      price: ticketForm.price,
+      total: ticketForm.quantity * ticketForm.price,
+      soldAt: new Date().toISOString(),
+      soldBy: ticketForm.soldBy || undefined,
+      notes: ticketForm.notes || undefined,
+    })
+    setTicketForm({ type: 'normal', quantity: 1, price: 180, soldBy: '', notes: '' })
+    setShowTicketModal(false)
+  }
+
+  const handleAddComp = () => {
+    if (!id || !compForm.recipient) return
+    addComplementaryTicket({
+      eventId: id,
+      showId: event?.showId || '',
+      recipient: compForm.recipient,
+      quantity: compForm.quantity,
+      reason: compForm.reason || '',
+      issuedAt: new Date().toISOString(),
+      issuedBy: compForm.issuedBy || undefined,
+    })
+    setCompForm({ recipient: '', quantity: 1, reason: '', issuedBy: '' })
+    setShowCompModal(false)
+  }
+
+  const handleAddAttendance = () => {
+    if (!id) return
+    addAttendance({
+      eventId: id,
+      normalTickets: attendanceForm.normalTickets,
+      vipTickets: attendanceForm.vipTickets,
+      studentTickets: attendanceForm.studentTickets,
+      complementaryTickets: attendanceForm.complementaryTickets,
+      totalAudience:
+        attendanceForm.normalTickets +
+        attendanceForm.vipTickets +
+        attendanceForm.studentTickets +
+        attendanceForm.complementaryTickets,
+      recordedAt: new Date().toISOString(),
+    })
+    setAttendanceForm({ normalTickets: 0, vipTickets: 0, studentTickets: 0, complementaryTickets: 0 })
+    setShowAttendanceModal(false)
+  }
+
   const handleResolveIncident = () => {
-    if (handleTarget && resolution) {
+    if (handleTarget && resolution && id) {
+      const now = new Date().toISOString()
+      const incident = incidents.find((i) => i.id === handleTarget)
       updateIncident(handleTarget, { handled: true, resolution })
+      addTimelineEvent({
+        eventId: id,
+        type: 'incident_resolved',
+        timestamp: now,
+        title: `事故解决：${incident?.title || '已处理'}`,
+        description: resolution,
+      })
       setHandleTarget(null)
       setResolution('')
       setShowHandleModal(false)
@@ -515,19 +614,43 @@ function EventDetail() {
             {event.venue && <span className="flex items-center gap-1"><MapPin className="w-4 h-4" />{event.venue}</span>}
           </div>
         </div>
-        <Button onClick={handleExportPack}>
-          <Download className="w-4 h-4" />
-          导出执行包
-        </Button>
+        <div className="flex gap-2">
+          <div className="flex p-1 bg-slate-100 rounded-xl">
+            <button
+              onClick={() => setViewMode('panel')}
+              className={cn(
+                'px-3 py-1.5 rounded-lg text-sm font-medium transition-all',
+                viewMode === 'panel' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700',
+              )}
+            >
+              执行面板
+            </button>
+            <button
+              onClick={() => setViewMode('sheet')}
+              className={cn(
+                'px-3 py-1.5 rounded-lg text-sm font-medium transition-all',
+                viewMode === 'sheet' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700',
+              )}
+            >
+              执行单
+            </button>
+          </div>
+          <Button onClick={handleExportPack}>
+            <Download className="w-4 h-4" />
+            导出执行包
+          </Button>
+        </div>
       </div>
 
-      <div className="grid grid-cols-5 gap-3">
-        <MiniStat label="排班人数" value={eventAssignments.length} icon={<Users className="w-4 h-4 text-blue-500" />} />
-        <MiniStat label="检查进度" value={`${checkedRatio}%`} icon={<ClipboardList className="w-4 h-4 text-amber-500" />} />
-        <MiniStat label="售票数" value={totalTickets} icon={<Ticket className="w-4 h-4 text-green-500" />} />
-        <MiniStat label="入场观众" value={totalAudience} icon={<Users className="w-4 h-4 text-purple-500" />} />
-        <MiniStat label="票房收入" value={`¥${totalRevenue.toLocaleString()}`} icon={<DollarSign className="w-4 h-4 text-amber-500" />} />
-      </div>
+      {viewMode === 'panel' && (
+        <div className="grid grid-cols-5 gap-3">
+          <MiniStat label="排班人数" value={eventAssignments.length} icon={<Users className="w-4 h-4 text-blue-500" />} />
+          <MiniStat label="检查进度" value={`${checkedRatio}%`} icon={<ClipboardList className="w-4 h-4 text-amber-500" />} />
+          <MiniStat label="售票数" value={totalTickets} icon={<Ticket className="w-4 h-4 text-green-500" />} />
+          <MiniStat label="入场观众" value={totalAudience} icon={<Users className="w-4 h-4 text-purple-500" />} />
+          <MiniStat label="票房收入" value={`¥${totalRevenue.toLocaleString()}`} icon={<DollarSign className="w-4 h-4 text-amber-500" />} />
+        </div>
+      )}
 
       {show && (
         <Card title="剧目信息">
@@ -545,13 +668,15 @@ function EventDetail() {
         </Card>
       )}
 
-      <Card
-        title={
-          <div className="flex items-center gap-2">
-            <Timer className="w-5 h-5 text-violet-500" />
-            <span>当天执行时间线</span>
-          </div>
-        }
+      {viewMode === 'panel' && (
+        <>
+          <Card
+            title={
+              <div className="flex items-center gap-2">
+                <Timer className="w-5 h-5 text-violet-500" />
+                <span>当天执行时间线</span>
+              </div>
+            }
         rightAction={
           <Button size="sm" onClick={() => setShowTimelineModal(true)}>
             <Plus className="w-4 h-4" />
@@ -737,24 +862,49 @@ function EventDetail() {
           )}
         </Card>
 
-        <Card title={<div className="flex items-center gap-2"><Ticket className="w-5 h-5 text-green-500" /><span>票务入场</span></div>}>
+        <Card
+          title={<div className="flex items-center gap-2"><Ticket className="w-5 h-5 text-green-500" /><span>票务入场</span></div>}
+          rightAction={
+            <div className="flex gap-1">
+              <Button size="sm" variant="ghost" onClick={() => setShowTicketModal(true)} title="录入售票">
+                <DollarSign className="w-3.5 h-3.5" />
+                售票
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setShowCompModal(true)} title="登记赠票">
+                <Gift className="w-3.5 h-3.5" />
+                赠票
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setShowAttendanceModal(true)} title="入场统计">
+                <Users className="w-3.5 h-3.5" />
+                入场
+              </Button>
+            </div>
+          }
+        >
           <div className="space-y-3">
-            {ticketSales.length > 0 && (
-              <div className="grid grid-cols-3 gap-3">
-                <div className="p-3 rounded-lg bg-green-50 text-center">
-                  <p className="text-2xl font-bold text-green-700">{totalTickets}</p>
-                  <p className="text-xs text-green-600">已售票</p>
-                </div>
-                <div className="p-3 rounded-lg bg-amber-50 text-center">
-                  <p className="text-2xl font-bold text-amber-700">{totalComp}</p>
-                  <p className="text-xs text-amber-600">赠票</p>
-                </div>
-                <div className="p-3 rounded-lg bg-blue-50 text-center">
-                  <p className="text-2xl font-bold text-blue-700">{totalAudience}</p>
-                  <p className="text-xs text-blue-600">入场</p>
-                </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="p-3 rounded-lg bg-green-50 text-center">
+                <p className="text-2xl font-bold text-green-700">{totalTickets}</p>
+                <p className="text-xs text-green-600">已售票</p>
+                {ticketSales.length > 0 && (
+                  <p className="text-[10px] text-green-500 mt-1">¥{ticketSales.reduce((s, t) => s + t.total, 0).toLocaleString()}</p>
+                )}
               </div>
-            )}
+              <div className="p-3 rounded-lg bg-amber-50 text-center">
+                <p className="text-2xl font-bold text-amber-700">{totalComp}</p>
+                <p className="text-xs text-amber-600">赠票</p>
+                {complementaryTickets.length > 0 && (
+                  <p className="text-[10px] text-amber-500 mt-1">{complementaryTickets.length} 条记录</p>
+                )}
+              </div>
+              <div className="p-3 rounded-lg bg-blue-50 text-center">
+                <p className="text-2xl font-bold text-blue-700">{totalAudience}</p>
+                <p className="text-xs text-blue-600">入场</p>
+                {attendance.length > 0 && (
+                  <p className="text-[10px] text-blue-500 mt-1">最近: {formatTime(attendance[attendance.length - 1].recordedAt)}</p>
+                )}
+              </div>
+            </div>
             {complementaryTickets.length > 0 && (
               <div>
                 <p className="text-xs text-slate-500 font-medium mb-1">赠票记录</p>
@@ -766,8 +916,21 @@ function EventDetail() {
                 ))}
               </div>
             )}
-            {ticketSales.length === 0 && complementaryTickets.length === 0 && (
-              <p className="text-slate-400 text-center py-4 text-sm">暂无票务数据</p>
+            {ticketSales.length > 0 && (
+              <div>
+                <p className="text-xs text-slate-500 font-medium mb-1">售票明细</p>
+                {[...ticketSales].sort((a, b) => new Date(b.soldAt).getTime() - new Date(a.soldAt).getTime()).slice(0, 3).map((t) => (
+                  <div key={t.id} className="flex items-center justify-between py-1.5 text-sm">
+                    <span className="text-slate-700">
+                      {({ normal: '普通票', vip: 'VIP票', student: '学生票' } as Record<string, string>)[t.type]} × {t.quantity}
+                    </span>
+                    <span className="text-slate-600">¥{t.total.toLocaleString()}</span>
+                  </div>
+                ))}
+                {ticketSales.length > 3 && (
+                  <p className="text-xs text-slate-400 text-center mt-1">还有 {ticketSales.length - 3} 条记录</p>
+                )}
+              </div>
             )}
           </div>
         </Card>
@@ -831,6 +994,231 @@ function EventDetail() {
           </div>
         </Card>
       </div>
+        </>
+      )}
+
+      {viewMode === 'sheet' && (
+        <Card className="mb-4">
+          <div className="flex items-center justify-between mb-6 pb-4 border-b border-slate-200">
+            <div>
+              <h3 className="text-xl font-bold text-slate-800">{event.title} · 当日执行单</h3>
+              <p className="text-sm text-slate-500 mt-1">
+                {formatDateTime(event.start)} - {formatTime(event.end)} · {event.venue || '未安排场地'}
+              </p>
+            </div>
+            <Badge variant={eventTypeBadge[event.type]}>{eventTypeLabels[event.type]}</Badge>
+          </div>
+
+          <div className="space-y-8">
+            <section>
+              <h4 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
+                <Users className="w-4 h-4 text-blue-500" />
+                人员到场确认
+                <span className="text-xs text-slate-400 font-normal">（{eventAssignments.length} 人排班）</span>
+              </h4>
+              <div className="grid grid-cols-2 gap-2">
+                {eventAssignments.length === 0 ? (
+                  <p className="text-slate-400 text-sm col-span-2 text-center py-3">暂无排班人员</p>
+                ) : (
+                  eventAssignments.map((a) => (
+                    <label key={a.id} className="flex items-center gap-3 p-3 rounded-lg hover:bg-slate-50 cursor-pointer border border-slate-100">
+                      <input type="checkbox" className="w-4 h-4 rounded border-slate-300 text-amber-500 focus:ring-amber-500" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-slate-800">{a.name}</p>
+                        <p className="text-xs text-slate-500">{a.role}</p>
+                      </div>
+                      {a.onLeave && <Badge variant="danger" className="text-[10px]">请假</Badge>}
+                    </label>
+                  ))
+                )}
+              </div>
+            </section>
+
+            <section>
+              <h4 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
+                <Package className="w-4 h-4 text-amber-500" />
+                道具到位确认
+                <span className="text-xs text-slate-400 font-normal">（{eventPropAssignments.length} 项）</span>
+              </h4>
+              <div className="space-y-2">
+                {eventPropAssignments.length === 0 ? (
+                  <p className="text-slate-400 text-sm text-center py-3">暂无分配道具</p>
+                ) : (
+                  eventPropAssignments.map((a) => {
+                    const prop = allProps.find((p) => p.id === a.propId)
+                    return (
+                      <label key={a.id} className="flex items-center gap-3 p-3 rounded-lg hover:bg-slate-50 cursor-pointer border border-slate-100">
+                        <input type="checkbox" className="w-4 h-4 rounded border-slate-300 text-amber-500 focus:ring-amber-500" />
+                        <div className="flex-1">
+                          <p className="text-sm font-medium text-slate-800">{prop?.name || '未知道具'}</p>
+                          <p className="text-xs text-slate-500">{prop?.category || ''} · 数量 {a.quantity}</p>
+                        </div>
+                        {a.notes && <span className="text-xs text-slate-400">{a.notes}</span>}
+                      </label>
+                    )
+                  })
+                )}
+              </div>
+            </section>
+
+            <section>
+              <h4 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
+                <Shirt className="w-4 h-4 text-purple-500" />
+                服装到位确认
+                <span className="text-xs text-slate-400 font-normal">（{eventCostumeAssignments.length} 项）</span>
+              </h4>
+              <div className="space-y-2">
+                {eventCostumeAssignments.length === 0 ? (
+                  <p className="text-slate-400 text-sm text-center py-3">暂无分配服装</p>
+                ) : (
+                  eventCostumeAssignments.map((a) => {
+                    const costume = allCostumes.find((c) => c.id === a.costumeId)
+                    return (
+                      <label key={a.id} className="flex items-center gap-3 p-3 rounded-lg hover:bg-slate-50 cursor-pointer border border-slate-100">
+                        <input type="checkbox" className="w-4 h-4 rounded border-slate-300 text-amber-500 focus:ring-amber-500" />
+                        <div className="flex-1">
+                          <p className="text-sm font-medium text-slate-800">{costume?.name || '未知服装'}</p>
+                          <p className="text-xs text-slate-500">{costume?.character || ''} · {costume?.size || ''} · 数量 {a.quantity}</p>
+                        </div>
+                        {a.notes && <span className="text-xs text-slate-400">{a.notes}</span>}
+                      </label>
+                    )
+                  })
+                )}
+              </div>
+            </section>
+
+            <section>
+              <h4 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
+                <ClipboardList className="w-4 h-4 text-green-500" />
+                灯光音响检查
+                <span className="text-xs text-slate-400 font-normal">（{checkItems.filter(c => c.checked).length}/{checkItems.length} 已完成）</span>
+              </h4>
+              <div className="space-y-4">
+                {['lighting', 'sound', 'stage', 'other'].map((cat) => {
+                  const catItems = checkItems.filter((c) => c.category === cat)
+                  if (catItems.length === 0) return null
+                  const catLabel = { lighting: '灯光', sound: '音响', stage: '舞台', other: '其他' }[cat]
+                  return (
+                    <div key={cat}>
+                      <p className="text-xs text-slate-500 font-medium mb-2">{catLabel}</p>
+                      <div className="space-y-1">
+                        {catItems.map((item) => (
+                          <label key={item.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-slate-50 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={item.checked}
+                              onChange={() => toggleCheckItem(item.id)}
+                              className="w-4 h-4 rounded border-slate-300 text-amber-500 focus:ring-amber-500"
+                            />
+                            <span className={cn('text-sm flex-1', item.checked ? 'text-slate-400 line-through' : 'text-slate-700')}>
+                              {item.name}
+                            </span>
+                            {item.checkedAt && <span className="text-[10px] text-slate-400">{formatTime(item.checkedAt)}</span>}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })}
+                {checkItems.length === 0 && (
+                  <p className="text-slate-400 text-sm text-center py-3">暂无检查项</p>
+                )}
+              </div>
+            </section>
+
+            <section>
+              <h4 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
+                <Ticket className="w-4 h-4 text-emerald-500" />
+                票务 & 入场
+              </h4>
+              <div className="grid grid-cols-3 gap-3 mb-3">
+                <div className="p-3 rounded-lg bg-green-50 text-center">
+                  <p className="text-2xl font-bold text-green-700">{totalTickets}</p>
+                  <p className="text-xs text-green-600">已售票</p>
+                </div>
+                <div className="p-3 rounded-lg bg-amber-50 text-center">
+                  <p className="text-2xl font-bold text-amber-700">{totalComp}</p>
+                  <p className="text-xs text-amber-600">赠票</p>
+                </div>
+                <div className="p-3 rounded-lg bg-blue-50 text-center">
+                  <p className="text-2xl font-bold text-blue-700">{totalAudience}</p>
+                  <p className="text-xs text-blue-600">入场</p>
+                </div>
+              </div>
+              {ticketSales.length > 0 && (
+                <div className="text-xs text-slate-500">
+                  票房收入：<span className="font-medium text-slate-700">¥{totalRevenue.toLocaleString()}</span>
+                </div>
+              )}
+            </section>
+
+            {incidents.length > 0 && (
+              <section>
+                <h4 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-red-500" />
+                  事故记录
+                  <span className="text-xs text-slate-400 font-normal">（{incidents.length} 条）</span>
+                </h4>
+                <div className="space-y-2">
+                  {incidents.map((i) => (
+                    <div key={i.id} className="p-3 rounded-lg border border-slate-100">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-medium text-slate-800">{i.title}</p>
+                        <Badge variant={i.handled ? 'success' : 'danger'} className="text-[10px]">
+                          {i.handled ? '已处理' : '待处理'}
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-1">
+                        {formatDateTime(i.timestamp)} · {{ minor: '轻微', moderate: '一般', serious: '严重' }[i.severity]}
+                      </p>
+                      {i.description && <p className="text-xs text-slate-600 mt-1">{i.description}</p>}
+                      {i.handled && i.resolution && (
+                        <p className="text-xs text-green-600 mt-2 pt-2 border-t border-slate-100">处理结果：{i.resolution}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            <section>
+              <h4 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
+                <Clock className="w-4 h-4 text-violet-500" />
+                执行时间线
+              </h4>
+              <div className="relative pl-6">
+                <div className="absolute left-2.5 top-1 bottom-1 w-0.5 bg-slate-200" />
+                {sortedTimeline.length === 0 ? (
+                  <p className="text-slate-400 text-sm">暂无时间线记录</p>
+                ) : (
+                  sortedTimeline.map((t) => (
+                    <div key={t.id} className="relative pb-4 last:pb-0">
+                      <div className={cn('absolute -left-1 top-1 w-4 h-4 rounded-full border-2 border-white shadow', timelineTypeColors[t.type])} />
+                      <div className="ml-4">
+                        <div className="flex items-center gap-2">
+                          <Badge variant="default" className="text-[10px]">{timelineTypeLabels[t.type]}</Badge>
+                          <span className="font-medium text-slate-800 text-sm">{t.title}</span>
+                        </div>
+                        <p className="text-xs text-slate-500 mt-0.5">{formatDateTime(t.timestamp)}</p>
+                        {t.description && <p className="text-xs text-slate-600 mt-1">{t.description}</p>}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </section>
+          </div>
+
+          <div className="mt-8 pt-4 border-t border-slate-200 flex justify-between items-center">
+            <p className="text-xs text-slate-400">执行单生成时间：{formatDateTime(new Date().toISOString())}</p>
+            <Button onClick={handleExportPack}>
+              <Download className="w-4 h-4" />
+              导出执行单
+            </Button>
+          </div>
+        </Card>
+      )}
 
       <Modal open={showAssignmentModal} onClose={() => setShowAssignmentModal(false)} title="添加排班人员" size="sm" footer={
         <div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => setShowAssignmentModal(false)}>取消</Button><Button onClick={handleAddAssignment}>添加</Button></div>
@@ -918,6 +1306,164 @@ function EventDetail() {
         <div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => setShowHandleModal(false)}>取消</Button><Button variant="success" onClick={handleResolveIncident}><Check className="w-4 h-4" />确认</Button></div>
       }>
         <TextArea label="处理结果" value={resolution} onChange={(e) => setResolution(e.target.value)} placeholder="描述处理方式和结果..." rows={4} />
+      </Modal>
+
+      <Modal
+        open={showTicketModal}
+        onClose={() => setShowTicketModal(false)}
+        title="录入售票"
+        size="md"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setShowTicketModal(false)}>取消</Button>
+            <Button onClick={handleAddTicket}>保存</Button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <Select
+              label="票种"
+              value={ticketForm.type}
+              onChange={(e) => setTicketForm({ ...ticketForm, type: e.target.value })}
+              options={[
+                { value: 'normal', label: '普通票' },
+                { value: 'vip', label: 'VIP票' },
+                { value: 'student', label: '学生票' },
+              ]}
+            />
+            <Input
+              label="售票人"
+              value={ticketForm.soldBy}
+              onChange={(e) => setTicketForm({ ...ticketForm, soldBy: e.target.value })}
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Input
+              label="数量"
+              type="number"
+              min={1}
+              value={ticketForm.quantity}
+              onChange={(e) => setTicketForm({ ...ticketForm, quantity: parseInt(e.target.value) || 1 })}
+            />
+            <Input
+              label="单价 (¥)"
+              type="number"
+              min={0}
+              value={ticketForm.price}
+              onChange={(e) => setTicketForm({ ...ticketForm, price: parseInt(e.target.value) || 0 })}
+            />
+          </div>
+          <div className="p-4 rounded-lg bg-amber-50 flex items-center justify-between">
+            <span className="text-sm text-amber-700">应收金额</span>
+            <span className="text-2xl font-bold text-amber-700">
+              ¥{(ticketForm.quantity * ticketForm.price).toLocaleString()}
+            </span>
+          </div>
+          <Input
+            label="备注"
+            value={ticketForm.notes}
+            onChange={(e) => setTicketForm({ ...ticketForm, notes: e.target.value })}
+          />
+        </div>
+      </Modal>
+
+      <Modal
+        open={showCompModal}
+        onClose={() => setShowCompModal(false)}
+        title="登记赠票"
+        size="md"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setShowCompModal(false)}>取消</Button>
+            <Button onClick={handleAddComp}>保存</Button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <Input
+              label="受赠方"
+              value={compForm.recipient}
+              onChange={(e) => setCompForm({ ...compForm, recipient: e.target.value })}
+              placeholder="如：媒体嘉宾、合作单位"
+            />
+            <Input
+              label="数量"
+              type="number"
+              min={1}
+              value={compForm.quantity}
+              onChange={(e) => setCompForm({ ...compForm, quantity: parseInt(e.target.value) || 1 })}
+            />
+          </div>
+          <Input
+            label="事由"
+            value={compForm.reason}
+            onChange={(e) => setCompForm({ ...compForm, reason: e.target.value })}
+            placeholder="如：媒体宣传、商务合作"
+          />
+          <Input
+            label="登记人"
+            value={compForm.issuedBy}
+            onChange={(e) => setCompForm({ ...compForm, issuedBy: e.target.value })}
+          />
+        </div>
+      </Modal>
+
+      <Modal
+        open={showAttendanceModal}
+        onClose={() => setShowAttendanceModal(false)}
+        title="录入入场统计"
+        size="md"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setShowAttendanceModal(false)}>取消</Button>
+            <Button onClick={handleAddAttendance}>保存</Button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <Input
+              label="普通票入场"
+              type="number"
+              min={0}
+              value={attendanceForm.normalTickets}
+              onChange={(e) => setAttendanceForm({ ...attendanceForm, normalTickets: parseInt(e.target.value) || 0 })}
+            />
+            <Input
+              label="VIP票入场"
+              type="number"
+              min={0}
+              value={attendanceForm.vipTickets}
+              onChange={(e) => setAttendanceForm({ ...attendanceForm, vipTickets: parseInt(e.target.value) || 0 })}
+            />
+            <Input
+              label="学生票入场"
+              type="number"
+              min={0}
+              value={attendanceForm.studentTickets}
+              onChange={(e) => setAttendanceForm({ ...attendanceForm, studentTickets: parseInt(e.target.value) || 0 })}
+            />
+            <Input
+              label="赠票入场"
+              type="number"
+              min={0}
+              value={attendanceForm.complementaryTickets}
+              onChange={(e) => setAttendanceForm({ ...attendanceForm, complementaryTickets: parseInt(e.target.value) || 0 })}
+            />
+          </div>
+          <div className="p-4 rounded-lg bg-green-50 flex items-center justify-between">
+            <span className="text-sm text-green-700">入场总人数</span>
+            <span className="text-2xl font-bold text-green-700">
+              {attendanceForm.normalTickets +
+                attendanceForm.vipTickets +
+                attendanceForm.studentTickets +
+                attendanceForm.complementaryTickets}{' '}
+              人
+            </span>
+          </div>
+        </div>
       </Modal>
     </div>
   )

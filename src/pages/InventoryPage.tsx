@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import {
   Package,
   Shirt,
@@ -8,7 +8,10 @@ import {
   ArrowLeftRight,
   MapPin,
   Edit2,
+  AlertTriangle,
+  CheckCircle2,
 } from 'lucide-react'
+import { parseISO, isSameDay } from 'date-fns'
 import { useAppStore } from '../store'
 import Card from '../components/Card'
 import Button from '../components/Button'
@@ -17,7 +20,7 @@ import Input from '../components/Input'
 import Select from '../components/Select'
 import TextArea from '../components/TextArea'
 import Modal from '../components/Modal'
-import { cn, formatDate } from '../lib/utils'
+import { cn, formatDate, formatTime } from '../lib/utils'
 import type { PropStatus, CostumeStatus, EventPropAssignment, EventCostumeAssignment } from '../types'
 
 const propStatusLabels: Record<PropStatus, string> = {
@@ -424,11 +427,31 @@ function PropsList() {
         open={showAssignModal}
         onClose={() => setShowAssignModal(false)}
         title="分配道具到场次"
-        size="sm"
+        size="md"
         footer={
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setShowAssignModal(false)}>取消</Button>
-            <Button onClick={handleAssign}>分配</Button>
+            <Button
+              onClick={handleAssign}
+              disabled={
+                assignTargetId && assignForm.eventId
+                  ? (() => {
+                      const prop = props.find((p) => p.id === assignTargetId)
+                      const targetEvent = events.find((e) => e.id === assignForm.eventId)
+                      if (!prop || !targetEvent) return false
+                      const targetDate = parseISO(targetEvent.start)
+                      const sameDayAssignments = eventPropAssignments.filter((a) => {
+                        const ev = events.find((e) => e.id === a.eventId)
+                        return ev && isSameDay(parseISO(ev.start), targetDate)
+                      })
+                      const usedQty = sameDayAssignments.reduce((sum, a) => sum + a.quantity, 0)
+                      return assignForm.quantity > prop.quantity - usedQty
+                    })()
+                  : true
+              }
+            >
+              分配
+            </Button>
           </div>
         }
       >
@@ -439,7 +462,7 @@ function PropsList() {
             onChange={(e) => setAssignForm({ ...assignForm, eventId: e.target.value })}
             options={[
               { value: '', label: '请选择场次' },
-              ...events.map((e) => ({ value: e.id, label: e.title })),
+              ...events.map((e) => ({ value: e.id, label: `${e.title}（${formatDate(e.start)}）` })),
             ]}
           />
           <Input
@@ -449,6 +472,74 @@ function PropsList() {
             value={assignForm.quantity}
             onChange={(e) => setAssignForm({ ...assignForm, quantity: parseInt(e.target.value) || 1 })}
           />
+
+          {assignTargetId && assignForm.eventId && (() => {
+            const prop = props.find((p) => p.id === assignTargetId)
+            const targetEvent = events.find((e) => e.id === assignForm.eventId)
+            if (!prop || !targetEvent) return null
+            const targetDate = parseISO(targetEvent.start)
+            const sameDayAssignments = eventPropAssignments.filter((a) => {
+              const ev = events.find((e) => e.id === a.eventId)
+              return ev && isSameDay(parseISO(ev.start), targetDate)
+            })
+            const usedQty = sameDayAssignments.reduce((sum, a) => sum + a.quantity, 0)
+            const remainingQty = prop.quantity - usedQty
+            const isOver = assignForm.quantity > remainingQty
+            return (
+              <div className={cn(
+                'p-4 rounded-xl border',
+                isOver ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200',
+              )}>
+                <div className="flex items-center gap-2 mb-3">
+                  {isOver
+                    ? <AlertTriangle className="w-5 h-5 text-red-500" />
+                    : <CheckCircle2 className="w-5 h-5 text-green-500" />}
+                  <span className={cn('font-medium', isOver ? 'text-red-700' : 'text-green-700')}>
+                    {formatDate(targetDate)} 资源占用情况
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-3 mb-3">
+                  <div className="text-center">
+                    <p className="text-xl font-bold text-slate-700">{prop.quantity}</p>
+                    <p className="text-xs text-slate-500">总库存</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-xl font-bold text-amber-600">{usedQty}</p>
+                    <p className="text-xs text-slate-500">当日已用</p>
+                  </div>
+                  <div className="text-center">
+                    <p className={cn('text-xl font-bold', isOver ? 'text-red-600' : 'text-green-600')}>
+                      {remainingQty}
+                    </p>
+                    <p className="text-xs text-slate-500">剩余可用</p>
+                  </div>
+                </div>
+                {sameDayAssignments.length > 0 && (
+                  <div>
+                    <p className="text-xs text-slate-500 font-medium mb-1.5">当日分配明细：</p>
+                    <div className="space-y-1">
+                      {sameDayAssignments.map((a) => {
+                        const ev = events.find((e) => e.id === a.eventId)
+                        return (
+                          <div key={a.id} className="flex items-center justify-between text-xs px-2 py-1 rounded bg-white/60">
+                            <span className="text-slate-700">{ev?.title || '未知场次'}</span>
+                            <span className="text-slate-500">{formatTime(ev?.start || '')} · {a.quantity} 件</span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+                {isOver && (
+                  <p className="text-xs text-red-600 mt-3 flex items-start gap-1">
+                    <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                    <span>数量不足：还需要 {assignForm.quantity} 件，但当日只剩 {remainingQty} 件可用（超出 {assignForm.quantity - remainingQty} 件）</span>
+                  </p>
+                )}
+              </div>
+            )
+          })()}
+
           <TextArea
             label="备注"
             value={assignForm.notes}
@@ -775,11 +866,31 @@ function CostumesList() {
         open={showAssignModal}
         onClose={() => setShowAssignModal(false)}
         title="分配服装到场次"
-        size="sm"
+        size="md"
         footer={
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setShowAssignModal(false)}>取消</Button>
-            <Button onClick={handleAssign}>分配</Button>
+            <Button
+              onClick={handleAssign}
+              disabled={
+                assignTargetId && assignForm.eventId
+                  ? (() => {
+                      const costume = costumes.find((c) => c.id === assignTargetId)
+                      const targetEvent = events.find((e) => e.id === assignForm.eventId)
+                      if (!costume || !targetEvent) return false
+                      const targetDate = parseISO(targetEvent.start)
+                      const sameDayAssignments = eventCostumeAssignments.filter((a) => {
+                        const ev = events.find((e) => e.id === a.eventId)
+                        return ev && isSameDay(parseISO(ev.start), targetDate)
+                      })
+                      const usedQty = sameDayAssignments.reduce((sum, a) => sum + a.quantity, 0)
+                      return assignForm.quantity > costume.quantity - usedQty
+                    })()
+                  : true
+              }
+            >
+              分配
+            </Button>
           </div>
         }
       >
@@ -790,7 +901,7 @@ function CostumesList() {
             onChange={(e) => setAssignForm({ ...assignForm, eventId: e.target.value })}
             options={[
               { value: '', label: '请选择场次' },
-              ...events.map((e) => ({ value: e.id, label: e.title })),
+              ...events.map((e) => ({ value: e.id, label: `${e.title}（${formatDate(e.start)}）` })),
             ]}
           />
           <Input
@@ -800,6 +911,74 @@ function CostumesList() {
             value={assignForm.quantity}
             onChange={(e) => setAssignForm({ ...assignForm, quantity: parseInt(e.target.value) || 1 })}
           />
+
+          {assignTargetId && assignForm.eventId && (() => {
+            const costume = costumes.find((c) => c.id === assignTargetId)
+            const targetEvent = events.find((e) => e.id === assignForm.eventId)
+            if (!costume || !targetEvent) return null
+            const targetDate = parseISO(targetEvent.start)
+            const sameDayAssignments = eventCostumeAssignments.filter((a) => {
+              const ev = events.find((e) => e.id === a.eventId)
+              return ev && isSameDay(parseISO(ev.start), targetDate)
+            })
+            const usedQty = sameDayAssignments.reduce((sum, a) => sum + a.quantity, 0)
+            const remainingQty = costume.quantity - usedQty
+            const isOver = assignForm.quantity > remainingQty
+            return (
+              <div className={cn(
+                'p-4 rounded-xl border',
+                isOver ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200',
+              )}>
+                <div className="flex items-center gap-2 mb-3">
+                  {isOver
+                    ? <AlertTriangle className="w-5 h-5 text-red-500" />
+                    : <CheckCircle2 className="w-5 h-5 text-green-500" />}
+                  <span className={cn('font-medium', isOver ? 'text-red-700' : 'text-green-700')}>
+                    {formatDate(targetDate)} 资源占用情况
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-3 mb-3">
+                  <div className="text-center">
+                    <p className="text-xl font-bold text-slate-700">{costume.quantity}</p>
+                    <p className="text-xs text-slate-500">总库存</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-xl font-bold text-amber-600">{usedQty}</p>
+                    <p className="text-xs text-slate-500">当日已用</p>
+                  </div>
+                  <div className="text-center">
+                    <p className={cn('text-xl font-bold', isOver ? 'text-red-600' : 'text-green-600')}>
+                      {remainingQty}
+                    </p>
+                    <p className="text-xs text-slate-500">剩余可用</p>
+                  </div>
+                </div>
+                {sameDayAssignments.length > 0 && (
+                  <div>
+                    <p className="text-xs text-slate-500 font-medium mb-1.5">当日分配明细：</p>
+                    <div className="space-y-1">
+                      {sameDayAssignments.map((a) => {
+                        const ev = events.find((e) => e.id === a.eventId)
+                        return (
+                          <div key={a.id} className="flex items-center justify-between text-xs px-2 py-1 rounded bg-white/60">
+                            <span className="text-slate-700">{ev?.title || '未知场次'}</span>
+                            <span className="text-slate-500">{formatTime(ev?.start || '')} · {a.quantity} 件</span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+                {isOver && (
+                  <p className="text-xs text-red-600 mt-3 flex items-start gap-1">
+                    <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                    <span>数量不足：还需要 {assignForm.quantity} 件，但当日只剩 {remainingQty} 件可用（超出 {assignForm.quantity - remainingQty} 件）</span>
+                  </p>
+                )}
+              </div>
+            )
+          })()}
+
           <TextArea
             label="备注"
             value={assignForm.notes}
