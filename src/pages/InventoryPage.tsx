@@ -18,7 +18,7 @@ import Select from '../components/Select'
 import TextArea from '../components/TextArea'
 import Modal from '../components/Modal'
 import { cn, formatDate } from '../lib/utils'
-import type { PropStatus, CostumeStatus } from '../types'
+import type { PropStatus, CostumeStatus, EventPropAssignment, EventCostumeAssignment } from '../types'
 
 const propStatusLabels: Record<PropStatus, string> = {
   in_stock: '在库',
@@ -92,9 +92,13 @@ export default function InventoryPage() {
 function PropsList() {
   const props = useAppStore((s) => s.props)
   const personnel = useAppStore((s) => s.personnel)
+  const events = useAppStore((s) => s.events)
+  const eventPropAssignments = useAppStore((s) => s.eventPropAssignments)
   const addProp = useAppStore((s) => s.addProp)
   const updateProp = useAppStore((s) => s.updateProp)
   const deleteProp = useAppStore((s) => s.deleteProp)
+  const addEventPropAssignment = useAppStore((s) => s.addEventPropAssignment)
+  const deleteEventPropAssignment = useAppStore((s) => s.deleteEventPropAssignment)
 
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
@@ -111,6 +115,35 @@ function PropsList() {
     returnDate: '',
     notes: '',
   })
+  const [showAssignModal, setShowAssignModal] = useState(false)
+  const [assignTargetId, setAssignTargetId] = useState<string | null>(null)
+  const [assignForm, setAssignForm] = useState({
+    eventId: '',
+    quantity: 1,
+    notes: '',
+  })
+
+  const getEventTitle = (id: string) => events.find((e) => e.id === id)?.title || '-'
+  const getAssignmentsForProp = (propId: string) =>
+    eventPropAssignments.filter((a) => a.propId === propId)
+
+  const openAssignModal = (propId: string) => {
+    setAssignTargetId(propId)
+    setAssignForm({ eventId: '', quantity: 1, notes: '' })
+    setShowAssignModal(true)
+  }
+
+  const handleAssign = () => {
+    if (!assignTargetId || !assignForm.eventId) return
+    addEventPropAssignment({
+      eventId: assignForm.eventId,
+      propId: assignTargetId,
+      quantity: assignForm.quantity || 1,
+      notes: assignForm.notes || undefined,
+    })
+    setShowAssignModal(false)
+    setAssignTargetId(null)
+  }
 
   const filtered = props.filter(
     (p) =>
@@ -223,52 +256,80 @@ function PropsList() {
                 <th className="py-3 px-4 font-medium">数量</th>
                 <th className="py-3 px-4 font-medium">状态</th>
                 <th className="py-3 px-4 font-medium">位置</th>
-                <th className="py-3 px-4 font-medium">借用人</th>
-                <th className="py-3 px-4 font-medium">借用日期</th>
+                <th className="py-3 px-4 font-medium">已分配场次</th>
                 <th className="py-3 px-4 font-medium">操作</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-8 text-center text-slate-400">
+                  <td colSpan={7} className="py-8 text-center text-slate-400">
                     暂无道具数据
                   </td>
                 </tr>
               ) : (
-                filtered.map((p) => (
-                  <tr key={p.id} className="border-b border-slate-50 hover:bg-slate-50/50">
-                    <td className="py-3 px-4 font-medium text-slate-800">{p.name}</td>
-                    <td className="py-3 px-4 text-sm text-slate-600">{p.category}</td>
-                    <td className="py-3 px-4 text-sm text-slate-600">{p.quantity}</td>
-                    <td className="py-3 px-4">
-                      <Badge variant={propStatusVariants[p.status]}>{propStatusLabels[p.status]}</Badge>
-                    </td>
-                    <td className="py-3 px-4 text-sm text-slate-600">{p.location || '-'}</td>
-                    <td className="py-3 px-4 text-sm text-slate-600">{getBorrowerName(p.borrowerId)}</td>
-                    <td className="py-3 px-4 text-sm text-slate-500">
-                      {p.borrowDate ? formatDate(p.borrowDate) : '-'}
-                    </td>
-                    <td className="py-3 px-4">
-                      <div className="flex gap-1">
-                        <button
-                          onClick={() => openModal(p)}
-                          className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => {
-                            if (confirm('确定删除此道具吗？')) deleteProp(p.id)
-                          }}
-                          className="p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-500"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                filtered.map((p) => {
+                  const assignments = getAssignmentsForProp(p.id)
+                  return (
+                    <tr key={p.id} className="border-b border-slate-50 hover:bg-slate-50/50">
+                      <td className="py-3 px-4 font-medium text-slate-800">{p.name}</td>
+                      <td className="py-3 px-4 text-sm text-slate-600">{p.category}</td>
+                      <td className="py-3 px-4 text-sm text-slate-600">{p.quantity}</td>
+                      <td className="py-3 px-4">
+                        <Badge variant={propStatusVariants[p.status]}>{propStatusLabels[p.status]}</Badge>
+                      </td>
+                      <td className="py-3 px-4 text-sm text-slate-600">{p.location || '-'}</td>
+                      <td className="py-3 px-4">
+                        {assignments.length === 0 ? (
+                          <span className="text-xs text-slate-400">未分配</span>
+                        ) : (
+                          <div className="flex flex-wrap gap-1">
+                            {assignments.map((a) => (
+                              <div key={a.id} className="group relative inline-flex items-center gap-1">
+                                <Badge variant="warning" className="text-[10px] py-0 h-5">
+                                  {getEventTitle(a.eventId)} ×{a.quantity}
+                                </Badge>
+                                <button
+                                  onClick={() => {
+                                    if (confirm('确定取消此场次的分配吗？')) deleteEventPropAssignment(a.id)
+                                  }}
+                                  className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-red-100 text-slate-400 hover:text-red-500 transition-all"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </td>
+                      <td className="py-3 px-4">
+                        <div className="flex gap-1">
+                          <button
+                            onClick={() => openAssignModal(p.id)}
+                            className="p-1.5 rounded-lg hover:bg-amber-50 text-slate-400 hover:text-amber-600"
+                            title="分配到场次"
+                          >
+                            <ArrowLeftRight className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => openModal(p)}
+                            className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => {
+                              if (confirm('确定删除此道具吗？')) deleteProp(p.id)
+                            }}
+                            className="p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-500"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })
               )}
             </tbody>
           </table>
@@ -358,6 +419,44 @@ function PropsList() {
           />
         </div>
       </Modal>
+
+      <Modal
+        open={showAssignModal}
+        onClose={() => setShowAssignModal(false)}
+        title="分配道具到场次"
+        size="sm"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setShowAssignModal(false)}>取消</Button>
+            <Button onClick={handleAssign}>分配</Button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <Select
+            label="选择场次"
+            value={assignForm.eventId}
+            onChange={(e) => setAssignForm({ ...assignForm, eventId: e.target.value })}
+            options={[
+              { value: '', label: '请选择场次' },
+              ...events.map((e) => ({ value: e.id, label: e.title })),
+            ]}
+          />
+          <Input
+            label="分配数量"
+            type="number"
+            min={1}
+            value={assignForm.quantity}
+            onChange={(e) => setAssignForm({ ...assignForm, quantity: parseInt(e.target.value) || 1 })}
+          />
+          <TextArea
+            label="备注"
+            value={assignForm.notes}
+            onChange={(e) => setAssignForm({ ...assignForm, notes: e.target.value })}
+            rows={2}
+          />
+        </div>
+      </Modal>
     </>
   )
 }
@@ -365,9 +464,13 @@ function PropsList() {
 function CostumesList() {
   const costumes = useAppStore((s) => s.costumes)
   const personnel = useAppStore((s) => s.personnel)
+  const events = useAppStore((s) => s.events)
+  const eventCostumeAssignments = useAppStore((s) => s.eventCostumeAssignments)
   const addCostume = useAppStore((s) => s.addCostume)
   const updateCostume = useAppStore((s) => s.updateCostume)
   const deleteCostume = useAppStore((s) => s.deleteCostume)
+  const addEventCostumeAssignment = useAppStore((s) => s.addEventCostumeAssignment)
+  const deleteEventCostumeAssignment = useAppStore((s) => s.deleteEventCostumeAssignment)
 
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
@@ -384,6 +487,35 @@ function CostumesList() {
     returnDate: '',
     notes: '',
   })
+  const [showAssignModal, setShowAssignModal] = useState(false)
+  const [assignTargetId, setAssignTargetId] = useState<string | null>(null)
+  const [assignForm, setAssignForm] = useState({
+    eventId: '',
+    quantity: 1,
+    notes: '',
+  })
+
+  const getEventTitle = (id: string) => events.find((e) => e.id === id)?.title || '-'
+  const getAssignmentsForCostume = (costumeId: string) =>
+    eventCostumeAssignments.filter((a) => a.costumeId === costumeId)
+
+  const openAssignModal = (costumeId: string) => {
+    setAssignTargetId(costumeId)
+    setAssignForm({ eventId: '', quantity: 1, notes: '' })
+    setShowAssignModal(true)
+  }
+
+  const handleAssign = () => {
+    if (!assignTargetId || !assignForm.eventId) return
+    addEventCostumeAssignment({
+      eventId: assignForm.eventId,
+      costumeId: assignTargetId,
+      quantity: assignForm.quantity || 1,
+      notes: assignForm.notes || undefined,
+    })
+    setShowAssignModal(false)
+    setAssignTargetId(null)
+  }
 
   const filtered = costumes.filter(
     (c) =>
@@ -473,61 +605,80 @@ function CostumesList() {
             <p className="text-slate-400 text-center py-8">暂无服装数据</p>
           </Card>
         ) : (
-          filtered.map((c) => (
-            <Card key={c.id}>
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 bg-gradient-to-br from-purple-100 to-purple-200 rounded-xl flex items-center justify-center">
-                    <Shirt className="w-6 h-6 text-purple-600" />
+          filtered.map((c) => {
+            const assignments = getAssignmentsForCostume(c.id)
+            return (
+              <Card key={c.id}>
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 bg-gradient-to-br from-purple-100 to-purple-200 rounded-xl flex items-center justify-center">
+                      <Shirt className="w-6 h-6 text-purple-600" />
+                    </div>
+                    <div>
+                      <h4 className="font-semibold text-slate-800">{c.name}</h4>
+                      <p className="text-xs text-slate-500 mt-0.5">{c.character || '通用角色'} · {c.size}</p>
+                    </div>
+                  </div>
+                  <Badge variant={costumeStatusVariants[c.status]}>{costumeStatusLabels[c.status]}</Badge>
+                </div>
+                <div className="mt-4 space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">数量</span>
+                    <span className="text-slate-800">{c.quantity} 件</span>
                   </div>
                   <div>
-                    <h4 className="font-semibold text-slate-800">{c.name}</h4>
-                    <p className="text-xs text-slate-500 mt-0.5">{c.character || '通用角色'} · {c.size}</p>
-                  </div>
-                </div>
-                <Badge variant={costumeStatusVariants[c.status]}>{costumeStatusLabels[c.status]}</Badge>
-              </div>
-              <div className="mt-4 space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-slate-500">数量</span>
-                  <span className="text-slate-800">{c.quantity} 件</span>
-                </div>
-                {(c.status === 'borrowed' || c.status === 'in_use') && (
-                  <>
-                    <div className="flex justify-between">
+                    <div className="flex justify-between mb-1">
                       <span className="text-slate-500 flex items-center gap-1">
                         <ArrowLeftRight className="w-3.5 h-3.5" />
-                        借用人
+                        已分配场次
                       </span>
-                      <span className="text-slate-800">{getBorrowerName(c.borrowerId)}</span>
                     </div>
-                    {c.borrowDate && (
-                      <div className="flex justify-between">
-                        <span className="text-slate-500">借用日期</span>
-                        <span className="text-slate-800">{formatDate(c.borrowDate)}</span>
+                    {assignments.length === 0 ? (
+                      <span className="text-xs text-slate-400">未分配</span>
+                    ) : (
+                      <div className="flex flex-wrap gap-1">
+                        {assignments.map((a) => (
+                          <div key={a.id} className="group relative inline-flex items-center gap-1">
+                            <Badge variant="warning" className="text-[10px] py-0 h-5">
+                              {getEventTitle(a.eventId)} ×{a.quantity}
+                            </Badge>
+                            <button
+                              onClick={() => {
+                                if (confirm('确定取消此场次的分配吗？')) deleteEventCostumeAssignment(a.id)
+                              }}
+                              className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-red-100 text-slate-400 hover:text-red-500 transition-all"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </div>
+                        ))}
                       </div>
                     )}
-                  </>
-                )}
-              </div>
-              <div className="flex gap-2 mt-4 pt-4 border-t border-slate-100">
-                <Button variant="secondary" size="sm" className="flex-1" onClick={() => openModal(c)}>
-                  <Edit2 className="w-3.5 h-3.5" />
-                  编辑
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-red-500 hover:text-red-600 hover:bg-red-50"
-                  onClick={() => {
-                    if (confirm('确定删除此服装吗？')) deleteCostume(c.id)
-                  }}
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </Button>
-              </div>
-            </Card>
-          ))
+                  </div>
+                </div>
+                <div className="flex gap-2 mt-4 pt-4 border-t border-slate-100">
+                  <Button size="sm" className="flex-1" onClick={() => openAssignModal(c.id)}>
+                    <ArrowLeftRight className="w-3.5 h-3.5" />
+                    分配
+                  </Button>
+                  <Button variant="secondary" size="sm" className="flex-1" onClick={() => openModal(c)}>
+                    <Edit2 className="w-3.5 h-3.5" />
+                    编辑
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-red-500 hover:text-red-600 hover:bg-red-50"
+                    onClick={() => {
+                      if (confirm('确定删除此服装吗？')) deleteCostume(c.id)
+                    }}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </Button>
+                </div>
+              </Card>
+            )
+          })
         )}
       </div>
 
@@ -616,6 +767,44 @@ function CostumesList() {
             value={formData.notes}
             onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
             rows={3}
+          />
+        </div>
+      </Modal>
+
+      <Modal
+        open={showAssignModal}
+        onClose={() => setShowAssignModal(false)}
+        title="分配服装到场次"
+        size="sm"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setShowAssignModal(false)}>取消</Button>
+            <Button onClick={handleAssign}>分配</Button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <Select
+            label="选择场次"
+            value={assignForm.eventId}
+            onChange={(e) => setAssignForm({ ...assignForm, eventId: e.target.value })}
+            options={[
+              { value: '', label: '请选择场次' },
+              ...events.map((e) => ({ value: e.id, label: e.title })),
+            ]}
+          />
+          <Input
+            label="分配数量"
+            type="number"
+            min={1}
+            value={assignForm.quantity}
+            onChange={(e) => setAssignForm({ ...assignForm, quantity: parseInt(e.target.value) || 1 })}
+          />
+          <TextArea
+            label="备注"
+            value={assignForm.notes}
+            onChange={(e) => setAssignForm({ ...assignForm, notes: e.target.value })}
+            rows={2}
           />
         </div>
       </Modal>

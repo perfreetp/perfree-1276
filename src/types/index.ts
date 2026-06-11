@@ -95,12 +95,55 @@ export interface Costume {
 
 export interface CheckItem {
   id: string
+  eventId?: string
   category: 'lighting' | 'sound' | 'stage' | 'other'
   name: string
   checked: boolean
   checkedBy?: string
   checkedAt?: string
   notes?: string
+}
+
+export interface EventPropAssignment {
+  id: string
+  eventId: string
+  propId: string
+  quantity: number
+  assignedAt: string
+  assignedBy?: string
+  notes?: string
+}
+
+export interface EventCostumeAssignment {
+  id: string
+  eventId: string
+  costumeId: string
+  quantity: number
+  assignedAt: string
+  assignedBy?: string
+  notes?: string
+}
+
+export type TimelineEventType =
+  | 'arrival'
+  | 'check_complete'
+  | 'ticket_open'
+  | 'entrance'
+  | 'curtain_up'
+  | 'intermission'
+  | 'curtain_down'
+  | 'incident'
+  | 'incident_resolved'
+  | 'other'
+
+export interface TimelineEvent {
+  id: string
+  eventId: string
+  type: TimelineEventType
+  timestamp: string
+  title: string
+  description?: string
+  operatorId?: string
 }
 
 export interface TicketSale {

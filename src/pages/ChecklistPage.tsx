@@ -108,20 +108,31 @@ export default function ChecklistPage() {
 
 function ChecklistSection() {
   const checkItems = useAppStore((s) => s.checkItems)
+  const events = useAppStore((s) => s.events)
   const toggleCheckItem = useAppStore((s) => s.toggleCheckItem)
   const addCheckItem = useAppStore((s) => s.addCheckItem)
   const deleteCheckItem = useAppStore((s) => s.deleteCheckItem)
 
   const [showModal, setShowModal] = useState(false)
+  const [eventFilter, setEventFilter] = useState<string>('all')
   const [formData, setFormData] = useState({
     category: 'lighting' as CheckItem['category'],
     name: '',
     notes: '',
+    eventId: '',
   })
 
+  const getEventTitle = (eventId?: string) => events.find((e) => e.id === eventId)?.title || '通用'
+
+  const filteredItems = eventFilter === 'all'
+    ? checkItems
+    : eventFilter === 'none'
+    ? checkItems.filter((c) => !c.eventId)
+    : checkItems.filter((c) => c.eventId === eventFilter)
+
   const groups = ['lighting', 'sound', 'stage', 'other'] as const
-  const totalItems = checkItems.length
-  const checkedItems = checkItems.filter((c) => c.checked).length
+  const totalItems = filteredItems.length
+  const checkedItems = filteredItems.filter((c) => c.checked).length
   const progress = totalItems > 0 ? Math.round((checkedItems / totalItems) * 100) : 0
 
   const handleSave = () => {
@@ -130,9 +141,10 @@ function ChecklistSection() {
       ...formData,
       checked: false,
       notes: formData.notes || undefined,
+      eventId: formData.eventId || undefined,
     })
     setShowModal(false)
-    setFormData({ category: 'lighting', name: '', notes: '' })
+    setFormData({ category: 'lighting', name: '', notes: '', eventId: '' })
   }
 
   const categoryIcons: Record<string, React.ReactNode> = {
@@ -167,7 +179,17 @@ function ChecklistSection() {
         </Card>
       </div>
 
-      <div className="flex justify-end">
+      <div className="flex justify-between items-center flex-wrap gap-3">
+        <Select
+          value={eventFilter}
+          onChange={(e) => setEventFilter(e.target.value)}
+          className="w-64"
+          options={[
+            { value: 'all', label: '全部场次' },
+            { value: 'none', label: '通用（不关联场次）' },
+            ...events.map((e) => ({ value: e.id, label: e.title })),
+          ]}
+        />
         <Button onClick={() => setShowModal(true)}>
           <Plus className="w-4 h-4" />
           添加检查项
@@ -176,7 +198,7 @@ function ChecklistSection() {
 
       <div className="grid grid-cols-2 gap-6">
         {groups.map((group) => {
-          const items = checkItems.filter((c) => c.category === group)
+          const items = filteredItems.filter((c) => c.category === group)
           const checked = items.filter((i) => i.checked).length
           return (
             <Card
@@ -211,19 +233,26 @@ function ChecklistSection() {
                       >
                         {item.checked && <Check className="w-3.5 h-3.5" />}
                       </button>
-                      <span
-                        className={cn(
-                          'text-sm flex-1 transition-all',
-                          item.checked && 'text-slate-400 line-through',
-                        )}
-                      >
-                        {item.name}
-                      </span>
-                      {item.checkedAt && (
-                        <span className="text-xs text-slate-400">
-                          {formatDateTime(item.checkedAt)}
+                      <div className="flex-1 min-w-0">
+                        <span
+                          className={cn(
+                            'text-sm block transition-all',
+                            item.checked && 'text-slate-400 line-through',
+                          )}
+                        >
+                          {item.name}
                         </span>
-                      )}
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <Badge variant="default" className="text-[10px] py-0 px-1.5 h-4">
+                            {getEventTitle(item.eventId)}
+                          </Badge>
+                          {item.checkedAt && (
+                            <span className="text-[10px] text-slate-400">
+                              {formatDateTime(item.checkedAt)}
+                            </span>
+                          )}
+                        </div>
+                      </div>
                       <button
                         onClick={() => {
                           if (confirm('确定删除此检查项吗？')) deleteCheckItem(item.id)
@@ -261,6 +290,15 @@ function ChecklistSection() {
             value={formData.category}
             onChange={(e) => setFormData({ ...formData, category: e.target.value as CheckItem['category'] })}
             options={Object.entries(categoryLabels).map(([v, l]) => ({ value: v, label: l }))}
+          />
+          <Select
+            label="关联场次"
+            value={formData.eventId}
+            onChange={(e) => setFormData({ ...formData, eventId: e.target.value })}
+            options={[
+              { value: '', label: '通用（不关联场次）' },
+              ...events.map((e) => ({ value: e.id, label: e.title })),
+            ]}
           />
           <Input
             label="检查项名称"

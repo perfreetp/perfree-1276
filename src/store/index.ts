@@ -16,6 +16,9 @@ import type {
   IncidentRecord,
   TodoItem,
   Expense,
+  EventPropAssignment,
+  EventCostumeAssignment,
+  TimelineEvent,
 } from '../types'
 import { generateId } from '../lib/utils'
 
@@ -185,19 +188,60 @@ const sampleComplementary: ComplementaryTicket[] = [
   { id: 'cp2', showId: 's1', eventId: 'e1', recipient: '合作单位', quantity: 15, reason: '商务合作', issuedAt: addDays(-2) },
 ]
 
+const sampleAssignments: Assignment[] = [
+  { id: 'as1', eventId: 'e1', personnelId: 'p1', role: '周朴园' },
+  { id: 'as2', eventId: 'e1', personnelId: 'p2', role: '繁漪' },
+  { id: 'as3', eventId: 'e1', personnelId: 'p3', role: '舞台监督' },
+  { id: 'as4', eventId: 'e1', personnelId: 'p4', role: '灯光师' },
+  { id: 'as5', eventId: 'e1', personnelId: 'p5', role: '音响师' },
+  { id: 'as6', eventId: 'e2', personnelId: 'p1', role: '周朴园' },
+  { id: 'as7', eventId: 'e2', personnelId: 'p2', role: '繁漪' },
+  { id: 'as8', eventId: 'e4', personnelId: 'p3', role: '舞台监督' },
+]
+
+const sampleEventProps: EventPropAssignment[] = [
+  { id: 'ep1', eventId: 'e1', propId: 'pr1', quantity: 1, assignedAt: addDays(-1) },
+  { id: 'ep2', eventId: 'e1', propId: 'pr2', quantity: 2, assignedAt: addDays(-1) },
+  { id: 'ep3', eventId: 'e2', propId: 'pr1', quantity: 1, assignedAt: addDays(0) },
+  { id: 'ep4', eventId: 'e4', propId: 'pr3', quantity: 2, assignedAt: addDays(1) },
+]
+
+const sampleEventCostumes: EventCostumeAssignment[] = [
+  { id: 'ec1', eventId: 'e1', costumeId: 'c1', quantity: 1, assignedAt: addDays(-1) },
+  { id: 'ec2', eventId: 'e1', costumeId: 'c2', quantity: 1, assignedAt: addDays(-1) },
+  { id: 'ec3', eventId: 'e2', costumeId: 'c1', quantity: 1, assignedAt: addDays(0) },
+  { id: 'ec4', eventId: 'e2', costumeId: 'c2', quantity: 1, assignedAt: addDays(0) },
+]
+
 const sampleCheckItems: CheckItem[] = [
-  { id: 'ci1', category: 'lighting', name: '主舞台面光灯', checked: true },
-  { id: 'ci2', category: 'lighting', name: '侧光灯', checked: true },
-  { id: 'ci3', category: 'lighting', name: '追光灯', checked: false },
-  { id: 'ci4', category: 'lighting', name: '天幕灯', checked: false },
-  { id: 'ci5', category: 'sound', name: '主音箱系统', checked: true },
-  { id: 'ci6', category: 'sound', name: '无线麦克风(手持)', checked: true },
-  { id: 'ci7', category: 'sound', name: '无线麦克风(头戴)', checked: false },
-  { id: 'ci8', category: 'sound', name: '监听音箱', checked: false },
-  { id: 'ci9', category: 'stage', name: '幕布升降', checked: true },
-  { id: 'ci10', category: 'stage', name: '转台运行', checked: false },
-  { id: 'ci11', category: 'stage', name: '消防通道', checked: true },
-  { id: 'ci12', category: 'stage', name: '应急照明', checked: true },
+  { id: 'ci1', eventId: 'e1', category: 'lighting', name: '主舞台面光灯', checked: true },
+  { id: 'ci2', eventId: 'e1', category: 'lighting', name: '侧光灯', checked: true },
+  { id: 'ci3', eventId: 'e1', category: 'lighting', name: '追光灯', checked: false },
+  { id: 'ci4', eventId: 'e1', category: 'lighting', name: '天幕灯', checked: false },
+  { id: 'ci5', eventId: 'e1', category: 'sound', name: '主音箱系统', checked: true },
+  { id: 'ci6', eventId: 'e1', category: 'sound', name: '无线麦克风(手持)', checked: true },
+  { id: 'ci7', eventId: 'e1', category: 'sound', name: '无线麦克风(头戴)', checked: false },
+  { id: 'ci8', eventId: 'e1', category: 'sound', name: '监听音箱', checked: false },
+  { id: 'ci9', eventId: 'e1', category: 'stage', name: '幕布升降', checked: true },
+  { id: 'ci10', eventId: 'e1', category: 'stage', name: '转台运行', checked: false },
+  { id: 'ci11', eventId: 'e1', category: 'stage', name: '消防通道', checked: true },
+  { id: 'ci12', eventId: 'e1', category: 'stage', name: '应急照明', checked: true },
+  { id: 'ci13', eventId: 'e2', category: 'lighting', name: '主舞台面光灯', checked: false },
+  { id: 'ci14', eventId: 'e2', category: 'lighting', name: '侧光灯', checked: false },
+  { id: 'ci15', eventId: 'e2', category: 'sound', name: '主音箱系统', checked: true },
+  { id: 'ci16', eventId: 'e2', category: 'sound', name: '无线麦克风(手持)', checked: true },
+  { id: 'ci17', eventId: 'e2', category: 'stage', name: '幕布升降', checked: true },
+  { id: 'ci18', eventId: 'e4', category: 'lighting', name: '主舞台面光灯', checked: false },
+  { id: 'ci19', eventId: 'e4', category: 'sound', name: '主音箱系统', checked: false },
+  { id: 'ci20', eventId: 'e4', category: 'stage', name: '消防通道', checked: true },
+]
+
+const sampleTimeline: TimelineEvent[] = [
+  { id: 'tl1', eventId: 'e1', type: 'arrival', timestamp: new Date(today.getFullYear(), today.getMonth(), today.getDate(), 17, 0).toISOString(), title: '演员到场签到' },
+  { id: 'tl2', eventId: 'e1', type: 'check_complete', timestamp: new Date(today.getFullYear(), today.getMonth(), today.getDate(), 18, 0).toISOString(), title: '灯光音响检查完成', description: '面光、侧光、主音箱、手持麦检查通过' },
+  { id: 'tl3', eventId: 'e1', type: 'ticket_open', timestamp: new Date(today.getFullYear(), today.getMonth(), today.getDate(), 18, 30).toISOString(), title: '票务窗口开放' },
+  { id: 'tl4', eventId: 'e1', type: 'entrance', timestamp: new Date(today.getFullYear(), today.getMonth(), today.getDate(), 19, 0).toISOString(), title: '观众开始入场' },
+  { id: 'tl5', eventId: 'e1', type: 'curtain_up', timestamp: new Date(today.getFullYear(), today.getMonth(), today.getDate(), 19, 30).toISOString(), title: '大幕拉开，演出开始' },
 ]
 
 const sampleLeaves: LeaveRecord[] = [
@@ -234,6 +278,9 @@ interface AppState {
   incidents: IncidentRecord[]
   todos: TodoItem[]
   expenses: Expense[]
+  eventPropAssignments: EventPropAssignment[]
+  eventCostumeAssignments: EventCostumeAssignment[]
+  timeline: TimelineEvent[]
 
   addEvent: (event: Omit<ScheduleEvent, 'id'>) => void
   updateEvent: (id: string, event: Partial<ScheduleEvent>) => void
@@ -265,6 +312,7 @@ interface AppState {
 
   toggleCheckItem: (id: string) => void
   addCheckItem: (item: Omit<CheckItem, 'id'>) => void
+  updateCheckItem: (id: string, item: Partial<CheckItem>) => void
   deleteCheckItem: (id: string) => void
 
   addTicketSale: (ticket: Omit<TicketSale, 'id'>) => void
@@ -282,6 +330,18 @@ interface AppState {
 
   addExpense: (expense: Omit<Expense, 'id'>) => void
   deleteExpense: (id: string) => void
+
+  addEventPropAssignment: (assignment: Omit<EventPropAssignment, 'id' | 'assignedAt'>) => void
+  updateEventPropAssignment: (id: string, assignment: Partial<EventPropAssignment>) => void
+  deleteEventPropAssignment: (id: string) => void
+
+  addEventCostumeAssignment: (assignment: Omit<EventCostumeAssignment, 'id' | 'assignedAt'>) => void
+  updateEventCostumeAssignment: (id: string, assignment: Partial<EventCostumeAssignment>) => void
+  deleteEventCostumeAssignment: (id: string) => void
+
+  addTimelineEvent: (event: Omit<TimelineEvent, 'id'>) => void
+  updateTimelineEvent: (id: string, event: Partial<TimelineEvent>) => void
+  deleteTimelineEvent: (id: string) => void
 }
 
 export const useAppStore = create<AppState>()(
@@ -291,7 +351,7 @@ export const useAppStore = create<AppState>()(
       shows: sampleShows,
       personnel: samplePersonnel,
       leaves: sampleLeaves,
-      assignments: [],
+      assignments: sampleAssignments,
       props: sampleProps,
       costumes: sampleCostumes,
       checkItems: sampleCheckItems,
@@ -302,6 +362,9 @@ export const useAppStore = create<AppState>()(
       incidents: sampleIncidents,
       todos: sampleTodos,
       expenses: sampleExpenses,
+      eventPropAssignments: sampleEventProps,
+      eventCostumeAssignments: sampleEventCostumes,
+      timeline: sampleTimeline,
 
       addEvent: (event) =>
         set((state) => ({ events: [...state.events, { ...event, id: generateId() }] })),
@@ -378,6 +441,10 @@ export const useAppStore = create<AppState>()(
         })),
       addCheckItem: (item) =>
         set((state) => ({ checkItems: [...state.checkItems, { ...item, id: generateId() }] })),
+      updateCheckItem: (id, item) =>
+        set((state) => ({
+          checkItems: state.checkItems.map((c) => (c.id === id ? { ...c, ...item } : c)),
+        })),
       deleteCheckItem: (id) =>
         set((state) => ({ checkItems: state.checkItems.filter((c) => c.id !== id) })),
 
@@ -415,6 +482,53 @@ export const useAppStore = create<AppState>()(
         set((state) => ({ expenses: [...state.expenses, { ...expense, id: generateId() }] })),
       deleteExpense: (id) =>
         set((state) => ({ expenses: state.expenses.filter((e) => e.id !== id) })),
+
+      addEventPropAssignment: (assignment) =>
+        set((state) => ({
+          eventPropAssignments: [
+            ...state.eventPropAssignments,
+            { ...assignment, id: generateId(), assignedAt: new Date().toISOString() },
+          ],
+        })),
+      updateEventPropAssignment: (id, assignment) =>
+        set((state) => ({
+          eventPropAssignments: state.eventPropAssignments.map((a) =>
+            a.id === id ? { ...a, ...assignment } : a,
+          ),
+        })),
+      deleteEventPropAssignment: (id) =>
+        set((state) => ({
+          eventPropAssignments: state.eventPropAssignments.filter((a) => a.id !== id),
+        })),
+
+      addEventCostumeAssignment: (assignment) =>
+        set((state) => ({
+          eventCostumeAssignments: [
+            ...state.eventCostumeAssignments,
+            { ...assignment, id: generateId(), assignedAt: new Date().toISOString() },
+          ],
+        })),
+      updateEventCostumeAssignment: (id, assignment) =>
+        set((state) => ({
+          eventCostumeAssignments: state.eventCostumeAssignments.map((a) =>
+            a.id === id ? { ...a, ...assignment } : a,
+          ),
+        })),
+      deleteEventCostumeAssignment: (id) =>
+        set((state) => ({
+          eventCostumeAssignments: state.eventCostumeAssignments.filter((a) => a.id !== id),
+        })),
+
+      addTimelineEvent: (event) =>
+        set((state) => ({
+          timeline: [...state.timeline, { ...event, id: generateId() }],
+        })),
+      updateTimelineEvent: (id, event) =>
+        set((state) => ({
+          timeline: state.timeline.map((t) => (t.id === id ? { ...t, ...event } : t)),
+        })),
+      deleteTimelineEvent: (id) =>
+        set((state) => ({ timeline: state.timeline.filter((t) => t.id !== id) })),
     }),
     {
       name: 'theater-manager-storage',

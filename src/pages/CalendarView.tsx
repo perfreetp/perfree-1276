@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo } from 'react'
 import {
   addMonths,
   subMonths,
@@ -12,8 +12,6 @@ import {
   format,
   parseISO,
   addDays,
-  differenceInDays,
-  isWithinInterval,
 } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
 import {
@@ -28,7 +26,6 @@ import {
   Users,
   Package,
   Shirt,
-  X,
 } from 'lucide-react'
 import {
   DndContext,
@@ -101,8 +98,10 @@ function detectConflicts(
   targetEvent: ScheduleEvent,
   allEvents: ScheduleEvent[],
   assignments: { eventId: string; personnelId: string; role: string }[],
-  props: { id: string; name: string; status: string; borrowerId?: string }[],
-  costumes: { id: string; name: string; status: string; borrowerId?: string }[],
+  eventPropAssignments: { eventId: string; propId: string }[],
+  eventCostumeAssignments: { eventId: string; costumeId: string }[],
+  props: { id: string; name: string }[],
+  costumes: { id: string; name: string }[],
   personnel: { id: string; name: string }[],
 ): ConflictResult {
   const result: ConflictResult = {
@@ -152,12 +151,12 @@ function detectConflicts(
       }
     }
 
-    const targetPropIds = props
-      .filter((p) => p.status === 'in_use' || p.status === 'borrowed')
-      .map((p) => p.id)
-    const otherPropIds = props
-      .filter((p) => p.status === 'in_use' || p.status === 'borrowed')
-      .map((p) => p.id)
+    const targetPropIds = eventPropAssignments
+      .filter((a) => a.eventId === targetEvent.id)
+      .map((a) => a.propId)
+    const otherPropIds = eventPropAssignments
+      .filter((a) => a.eventId === other.id)
+      .map((a) => a.propId)
     for (const propId of targetPropIds) {
       if (otherPropIds.includes(propId)) {
         const p = props.find((x) => x.id === propId)
@@ -172,12 +171,12 @@ function detectConflicts(
       }
     }
 
-    const targetCostumeIds = costumes
-      .filter((c) => c.status === 'in_use' || c.status === 'borrowed')
-      .map((c) => c.id)
-    const otherCostumeIds = costumes
-      .filter((c) => c.status === 'in_use' || c.status === 'borrowed')
-      .map((c) => c.id)
+    const targetCostumeIds = eventCostumeAssignments
+      .filter((a) => a.eventId === targetEvent.id)
+      .map((a) => a.costumeId)
+    const otherCostumeIds = eventCostumeAssignments
+      .filter((a) => a.eventId === other.id)
+      .map((a) => a.costumeId)
     for (const costumeId of targetCostumeIds) {
       if (otherCostumeIds.includes(costumeId)) {
         const c = costumes.find((x) => x.id === costumeId)
@@ -342,6 +341,8 @@ export default function CalendarView() {
   const assignments = useAppStore((s) => s.assignments)
   const allProps = useAppStore((s) => s.props)
   const allCostumes = useAppStore((s) => s.costumes)
+  const eventPropAssignments = useAppStore((s) => s.eventPropAssignments)
+  const eventCostumeAssignments = useAppStore((s) => s.eventCostumeAssignments)
   const personnel = useAppStore((s) => s.personnel)
   const addEvent = useAppStore((s) => s.addEvent)
   const updateEvent = useAppStore((s) => s.updateEvent)
@@ -363,13 +364,13 @@ export default function CalendarView() {
   const conflicts = useMemo(() => {
     const result: Record<string, ConflictResult> = {}
     events.forEach((e) => {
-      const c = detectConflicts(e, events, assignments, allProps, allCostumes, personnel)
+      const c = detectConflicts(e, events, assignments, eventPropAssignments, eventCostumeAssignments, allProps, allCostumes, personnel)
       if (c.timeConflicts.length > 0 || c.details.length > 0) {
         result[e.id] = c
       }
     })
     return result
-  }, [events, assignments, allProps, allCostumes, personnel])
+  }, [events, assignments, eventPropAssignments, eventCostumeAssignments, allProps, allCostumes, personnel])
 
   const eventsByDate = useMemo(() => {
     const map: Record<string, ScheduleEvent[]> = {}
@@ -465,12 +466,17 @@ export default function CalendarView() {
     const originalStart = parseISO(dragEvent.start)
     const originalEnd = parseISO(dragEvent.end)
 
-    const diffMs = differenceInDays(targetDate, originalStart)
-
-    const newStart = new Date(originalStart)
-    newStart.setDate(newStart.getDate() + diffMs)
-    const newEnd = new Date(originalEnd)
-    newEnd.setDate(newEnd.getDate() + diffMs)
+    const newStart = new Date(
+      targetDate.getFullYear(),
+      targetDate.getMonth(),
+      targetDate.getDate(),
+      originalStart.getHours(),
+      originalStart.getMinutes(),
+      originalStart.getSeconds(),
+      originalStart.getMilliseconds(),
+    )
+    const durationMs = originalEnd.getTime() - originalStart.getTime()
+    const newEnd = new Date(newStart.getTime() + durationMs)
 
     updateEvent(dragEvent.id, {
       start: newStart.toISOString(),

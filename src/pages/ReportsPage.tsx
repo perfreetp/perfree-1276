@@ -588,6 +588,12 @@ function DataExport() {
   const state = useAppStore()
   const [selectedEventId, setSelectedEventId] = useState('')
 
+  const timelineTypeLabels: Record<string, string> = {
+    arrival: '到场签到', check_complete: '检查完成', ticket_open: '开票',
+    entrance: '入场', curtain_up: '大幕拉开', intermission: '中场休息',
+    curtain_down: '大幕落下', incident: '事故', incident_resolved: '事故解决', other: '其他',
+  }
+
   const handleExportPack = () => {
     if (!selectedEventId) return
     const event = state.events.find((e) => e.id === selectedEventId)
@@ -628,27 +634,33 @@ function DataExport() {
       exportToCSV(personnelData, `${eventName}_${dateStr}_人员.csv`)
     }
 
-    const propsInUse = state.props.filter((p) => p.status === 'in_use' || p.status === 'borrowed')
-    if (propsInUse.length > 0) {
-      const propsData = propsInUse.map((p) => ({
-        名称: p.name,
-        分类: p.category,
-        数量: p.quantity,
-        状态: { in_stock: '在库', in_use: '使用中', borrowed: '已借出', maintenance: '维护中' }[p.status],
-        位置: p.location || '',
-      }))
+    const eventPropAssignments = state.eventPropAssignments.filter((a) => a.eventId === selectedEventId)
+    if (eventPropAssignments.length > 0) {
+      const propsData = eventPropAssignments.map((a) => {
+        const p = state.props.find((x) => x.id === a.propId)
+        return {
+          名称: p?.name || '未知',
+          分类: p?.category || '',
+          数量: a.quantity,
+          位置: p?.location || '',
+          备注: a.notes || '',
+        }
+      })
       exportToCSV(propsData, `${eventName}_${dateStr}_道具.csv`)
     }
 
-    const costumesInUse = state.costumes.filter((c) => c.status === 'in_use' || c.status === 'borrowed')
-    if (costumesInUse.length > 0) {
-      const costumesData = costumesInUse.map((c) => ({
-        名称: c.name,
-        角色: c.character || '',
-        尺码: c.size,
-        数量: c.quantity,
-        状态: { in_stock: '在库', in_use: '使用中', borrowed: '已借出', cleaning: '清洗中' }[c.status],
-      }))
+    const eventCostumeAssignments = state.eventCostumeAssignments.filter((a) => a.eventId === selectedEventId)
+    if (eventCostumeAssignments.length > 0) {
+      const costumesData = eventCostumeAssignments.map((a) => {
+        const c = state.costumes.find((x) => x.id === a.costumeId)
+        return {
+          名称: c?.name || '未知',
+          角色: c?.character || '',
+          尺码: c?.size || '',
+          数量: a.quantity,
+          备注: a.notes || '',
+        }
+      })
       exportToCSV(costumesData, `${eventName}_${dateStr}_服装.csv`)
     }
 
@@ -676,12 +688,15 @@ function DataExport() {
       exportToCSV(ticketData as any[], `${eventName}_${dateStr}_票务.csv`)
     }
 
-    const checksData = state.checkItems.map((c) => ({
-      分类: ({ lighting: '灯光', sound: '音响', stage: '舞台', other: '其他' } as Record<string, string>)[c.category],
-      检查项: c.name,
-      状态: c.checked ? '✓ 已检查' : '✗ 未检查',
-    }))
-    exportToCSV(checksData, `${eventName}_${dateStr}_检查清单.csv`)
+    const eventCheckItems = state.checkItems.filter((c) => c.eventId === selectedEventId)
+    if (eventCheckItems.length > 0) {
+      const checksData = eventCheckItems.map((c) => ({
+        分类: ({ lighting: '灯光', sound: '音响', stage: '舞台', other: '其他' } as Record<string, string>)[c.category],
+        检查项: c.name,
+        状态: c.checked ? '✓ 已检查' : '✗ 未检查',
+      }))
+      exportToCSV(checksData, `${eventName}_${dateStr}_检查清单.csv`)
+    }
 
     const eventLogs = state.logs.filter((l) => l.eventId === selectedEventId)
     if (eventLogs.length > 0) {
@@ -704,6 +719,19 @@ function DataExport() {
         处理结果: i.resolution || '',
       }))
       exportToCSV(incidentsData, `${eventName}_${dateStr}_事故记录.csv`)
+    }
+
+    const eventTimeline = state.timeline.filter((t) => t.eventId === selectedEventId)
+      .slice()
+      .sort((a, b) => parseISO(a.timestamp).getTime() - parseISO(b.timestamp).getTime())
+    if (eventTimeline.length > 0) {
+      const timelineData = eventTimeline.map((t) => ({
+        时间: formatDateTime(t.timestamp),
+        类型: timelineTypeLabels[t.type] || t.type,
+        标题: t.title,
+        说明: t.description || '',
+      }))
+      exportToCSV(timelineData, `${eventName}_${dateStr}_执行时间线.csv`)
     }
   }
 
@@ -859,24 +887,27 @@ function DataExport() {
           const eventComp = state.complementaryTickets.filter((t) => t.eventId === selectedEventId)
           const eventLogs = state.logs.filter((l) => l.eventId === selectedEventId)
           const eventIncidents = state.incidents.filter((i) => i.eventId === selectedEventId)
-          const propsInUse = state.props.filter((p) => p.status === 'in_use' || p.status === 'borrowed')
-          const costumesInUse = state.costumes.filter((c) => c.status === 'in_use' || c.status === 'borrowed')
+          const eventPropAssignments = state.eventPropAssignments.filter((a) => a.eventId === selectedEventId)
+          const eventCostumeAssignments = state.eventCostumeAssignments.filter((a) => a.eventId === selectedEventId)
+          const eventCheckItems = state.checkItems.filter((c) => c.eventId === selectedEventId)
+          const eventTimeline = state.timeline.filter((t) => t.eventId === selectedEventId)
           const packItems = [
             { label: '排期信息', count: 1 },
             { label: '人员排班', count: eventAssignments.length },
-            { label: '道具清单', count: propsInUse.length },
-            { label: '服装清单', count: costumesInUse.length },
+            { label: '道具清单', count: eventPropAssignments.length },
+            { label: '服装清单', count: eventCostumeAssignments.length },
             { label: '票务数据', count: eventTickets.length + eventComp.length },
-            { label: '检查清单', count: state.checkItems.length },
+            { label: '检查清单', count: eventCheckItems.length },
             { label: '演出日志', count: eventLogs.length },
             { label: '事故记录', count: eventIncidents.length },
+            { label: '执行时间线', count: eventTimeline.length },
           ]
           return (
             <div className="mt-4 p-4 rounded-xl bg-amber-50/50 border border-amber-200">
               <p className="text-sm font-medium text-amber-800 mb-3">
                 即将导出「{ev.title}」的执行包，包含以下内容：
               </p>
-              <div className="grid grid-cols-4 gap-2">
+              <div className="grid grid-cols-3 gap-2">
                 {packItems.map((item) => (
                   <div key={item.label} className="flex items-center justify-between px-3 py-2 rounded-lg bg-white text-sm">
                     <span className="text-slate-600">{item.label}</span>
