@@ -19,6 +19,9 @@ import type {
   EventPropAssignment,
   EventCostumeAssignment,
   TimelineEvent,
+  PersonnelCheckin,
+  PropCheckin,
+  CostumeCheckin,
 } from '../types'
 import { generateId } from '../lib/utils'
 
@@ -244,6 +247,22 @@ const sampleTimeline: TimelineEvent[] = [
   { id: 'tl5', eventId: 'e1', type: 'curtain_up', timestamp: new Date(today.getFullYear(), today.getMonth(), today.getDate(), 19, 30).toISOString(), title: '大幕拉开，演出开始' },
 ]
 
+const samplePersonnelCheckins: PersonnelCheckin[] = [
+  { id: 'pc1', eventId: 'e1', assignmentId: 'a1', personnelId: 'p1', confirmed: true, confirmedAt: new Date(today.getFullYear(), today.getMonth(), today.getDate(), 17, 15).toISOString() },
+  { id: 'pc2', eventId: 'e1', assignmentId: 'a2', personnelId: 'p2', confirmed: true, confirmedAt: new Date(today.getFullYear(), today.getMonth(), today.getDate(), 17, 20).toISOString() },
+  { id: 'pc3', eventId: 'e1', assignmentId: 'a3', personnelId: 'p3', confirmed: false },
+]
+
+const samplePropCheckins: PropCheckin[] = [
+  { id: 'prc1', eventId: 'e1', assignmentId: 'ep1', propId: 'pr1', confirmed: true, confirmedAt: new Date(today.getFullYear(), today.getMonth(), today.getDate(), 17, 30).toISOString() },
+  { id: 'prc2', eventId: 'e1', assignmentId: 'ep2', propId: 'pr2', confirmed: false },
+]
+
+const sampleCostumeCheckins: CostumeCheckin[] = [
+  { id: 'cc1', eventId: 'e1', assignmentId: 'ec1', costumeId: 'c1', confirmed: true, confirmedAt: new Date(today.getFullYear(), today.getMonth(), today.getDate(), 17, 45).toISOString() },
+  { id: 'cc2', eventId: 'e1', assignmentId: 'ec2', costumeId: 'c2', confirmed: false },
+]
+
 const sampleLeaves: LeaveRecord[] = [
   { id: 'l1', personnelId: 'p1', startDate: addDays(3), endDate: addDays(5), reason: '家人住院需要照顾', status: 'pending', createdAt: addDays(-1) },
 ]
@@ -281,6 +300,9 @@ interface AppState {
   eventPropAssignments: EventPropAssignment[]
   eventCostumeAssignments: EventCostumeAssignment[]
   timeline: TimelineEvent[]
+  personnelCheckins: PersonnelCheckin[]
+  propCheckins: PropCheckin[]
+  costumeCheckins: CostumeCheckin[]
 
   addEvent: (event: Omit<ScheduleEvent, 'id'>) => void
   updateEvent: (id: string, event: Partial<ScheduleEvent>) => void
@@ -342,6 +364,10 @@ interface AppState {
   addTimelineEvent: (event: Omit<TimelineEvent, 'id'>) => void
   updateTimelineEvent: (id: string, event: Partial<TimelineEvent>) => void
   deleteTimelineEvent: (id: string) => void
+
+  updatePersonnelCheckin: (assignmentId: string, data: Partial<PersonnelCheckin>) => void
+  updatePropCheckin: (assignmentId: string, data: Partial<PropCheckin>) => void
+  updateCostumeCheckin: (assignmentId: string, data: Partial<CostumeCheckin>) => void
 }
 
 export const useAppStore = create<AppState>()(
@@ -365,6 +391,9 @@ export const useAppStore = create<AppState>()(
       eventPropAssignments: sampleEventProps,
       eventCostumeAssignments: sampleEventCostumes,
       timeline: sampleTimeline,
+      personnelCheckins: samplePersonnelCheckins,
+      propCheckins: samplePropCheckins,
+      costumeCheckins: sampleCostumeCheckins,
 
       addEvent: (event) =>
         set((state) => ({ events: [...state.events, { ...event, id: generateId() }] })),
@@ -529,6 +558,87 @@ export const useAppStore = create<AppState>()(
         })),
       deleteTimelineEvent: (id) =>
         set((state) => ({ timeline: state.timeline.filter((t) => t.id !== id) })),
+
+      updatePersonnelCheckin: (assignmentId, data) =>
+        set((state) => {
+          const existing = state.personnelCheckins.find((c) => c.assignmentId === assignmentId)
+          if (existing) {
+            return {
+              personnelCheckins: state.personnelCheckins.map((c) =>
+                c.assignmentId === assignmentId ? { ...c, ...data } : c,
+              ),
+            }
+          }
+          const eventAssignment = state.assignments.find((a) => a.id === assignmentId)
+          if (!eventAssignment) return state
+          return {
+            personnelCheckins: [
+              ...state.personnelCheckins,
+              {
+                id: generateId(),
+                eventId: eventAssignment.eventId,
+                assignmentId,
+                personnelId: eventAssignment.personnelId,
+                confirmed: data.confirmed ?? false,
+                ...data,
+              } as PersonnelCheckin,
+            ],
+          }
+        }),
+
+      updatePropCheckin: (assignmentId, data) =>
+        set((state) => {
+          const existing = state.propCheckins.find((c) => c.assignmentId === assignmentId)
+          if (existing) {
+            return {
+              propCheckins: state.propCheckins.map((c) =>
+                c.assignmentId === assignmentId ? { ...c, ...data } : c,
+              ),
+            }
+          }
+          const eventAssignment = state.eventPropAssignments.find((a) => a.id === assignmentId)
+          if (!eventAssignment) return state
+          return {
+            propCheckins: [
+              ...state.propCheckins,
+              {
+                id: generateId(),
+                eventId: eventAssignment.eventId,
+                assignmentId,
+                propId: eventAssignment.propId,
+                confirmed: data.confirmed ?? false,
+                ...data,
+              } as PropCheckin,
+            ],
+          }
+        }),
+
+      updateCostumeCheckin: (assignmentId, data) =>
+        set((state) => {
+          const existing = state.costumeCheckins.find((c) => c.assignmentId === assignmentId)
+          if (existing) {
+            return {
+              costumeCheckins: state.costumeCheckins.map((c) =>
+                c.assignmentId === assignmentId ? { ...c, ...data } : c,
+              ),
+            }
+          }
+          const eventAssignment = state.eventCostumeAssignments.find((a) => a.id === assignmentId)
+          if (!eventAssignment) return state
+          return {
+            costumeCheckins: [
+              ...state.costumeCheckins,
+              {
+                id: generateId(),
+                eventId: eventAssignment.eventId,
+                assignmentId,
+                costumeId: eventAssignment.costumeId,
+                confirmed: data.confirmed ?? false,
+                ...data,
+              } as CostumeCheckin,
+            ],
+          }
+        }),
     }),
     {
       name: 'theater-manager-storage',

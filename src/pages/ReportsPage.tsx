@@ -625,10 +625,13 @@ function DataExport() {
               end: new Date(parseISO(l.endDate).getTime() + 86400000),
             }),
         )
+        const checkin = state.personnelCheckins.find((c) => c.assignmentId === a.id)
         return {
           姓名: p?.name || '未知',
           岗位: a.role,
           是否请假: onLeave ? '是' : '否',
+          是否到场: checkin?.confirmed ? '已确认' : '未确认',
+          确认时间: checkin?.confirmedAt ? formatDateTime(checkin.confirmedAt) : '',
         }
       })
       exportToCSV(personnelData, `${eventName}_${dateStr}_人员.csv`)
@@ -638,11 +641,14 @@ function DataExport() {
     if (eventPropAssignments.length > 0) {
       const propsData = eventPropAssignments.map((a) => {
         const p = state.props.find((x) => x.id === a.propId)
+        const checkin = state.propCheckins.find((c) => c.assignmentId === a.id)
         return {
           名称: p?.name || '未知',
           分类: p?.category || '',
           数量: a.quantity,
           位置: p?.location || '',
+          是否到位: checkin?.confirmed ? '已确认' : '未确认',
+          确认时间: checkin?.confirmedAt ? formatDateTime(checkin.confirmedAt) : '',
           备注: a.notes || '',
         }
       })
@@ -653,11 +659,14 @@ function DataExport() {
     if (eventCostumeAssignments.length > 0) {
       const costumesData = eventCostumeAssignments.map((a) => {
         const c = state.costumes.find((x) => x.id === a.costumeId)
+        const checkin = state.costumeCheckins.find((ci) => ci.assignmentId === a.id)
         return {
           名称: c?.name || '未知',
           角色: c?.character || '',
           尺码: c?.size || '',
           数量: a.quantity,
+          是否到位: checkin?.confirmed ? '已确认' : '未确认',
+          确认时间: checkin?.confirmedAt ? formatDateTime(checkin.confirmedAt) : '',
           备注: a.notes || '',
         }
       })
@@ -891,11 +900,17 @@ function DataExport() {
           const eventCostumeAssignments = state.eventCostumeAssignments.filter((a) => a.eventId === selectedEventId)
           const eventCheckItems = state.checkItems.filter((c) => c.eventId === selectedEventId)
           const eventTimeline = state.timeline.filter((t) => t.eventId === selectedEventId)
+          const personnelCheckins = state.personnelCheckins.filter((c) => c.eventId === selectedEventId)
+          const propCheckins = state.propCheckins.filter((c) => c.eventId === selectedEventId)
+          const costumeCheckins = state.costumeCheckins.filter((c) => c.eventId === selectedEventId)
+          const pConfirmed = personnelCheckins.filter(c => c.confirmed).length
+          const prConfirmed = propCheckins.filter(c => c.confirmed).length
+          const cConfirmed = costumeCheckins.filter(c => c.confirmed).length
           const packItems = [
             { label: '排期信息', count: 1 },
-            { label: '人员排班', count: eventAssignments.length },
-            { label: '道具清单', count: eventPropAssignments.length },
-            { label: '服装清单', count: eventCostumeAssignments.length },
+            { label: '人员排班', count: eventAssignments.length, sub: `${pConfirmed}/${eventAssignments.length} 已确认` },
+            { label: '道具清单', count: eventPropAssignments.length, sub: `${prConfirmed}/${eventPropAssignments.length} 已确认` },
+            { label: '服装清单', count: eventCostumeAssignments.length, sub: `${cConfirmed}/${eventCostumeAssignments.length} 已确认` },
             { label: '票务数据', count: eventTickets.length + eventComp.length },
             { label: '检查清单', count: eventCheckItems.length },
             { label: '演出日志', count: eventLogs.length },
@@ -910,7 +925,10 @@ function DataExport() {
               <div className="grid grid-cols-3 gap-2">
                 {packItems.map((item) => (
                   <div key={item.label} className="flex items-center justify-between px-3 py-2 rounded-lg bg-white text-sm">
-                    <span className="text-slate-600">{item.label}</span>
+                    <div>
+                      <span className="text-slate-600">{item.label}</span>
+                      {item.sub && <span className="text-[10px] text-slate-400 ml-1">（{item.sub}）</span>}
+                    </div>
                     <span className={cn('font-medium', item.count > 0 ? 'text-amber-600' : 'text-slate-300')}>
                       {item.count} 条
                     </span>

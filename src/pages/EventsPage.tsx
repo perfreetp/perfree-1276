@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { Routes, Route, useParams, useNavigate } from 'react-router-dom'
 import { parseISO, format, isAfter, isBefore, isWithinInterval } from 'date-fns'
 import {
@@ -40,6 +40,9 @@ import type {
   CheckItem,
   TimelineEventType,
   TimelineEvent,
+  TicketSale,
+  ComplementaryTicket,
+  AttendanceRecord,
 } from '../types'
 
 const eventTypeLabels: Record<EventType, string> = {
@@ -246,6 +249,12 @@ function EventDetail() {
   const addTicketSale = useAppStore((s) => s.addTicketSale)
   const addComplementaryTicket = useAppStore((s) => s.addComplementaryTicket)
   const addAttendance = useAppStore((s) => s.addAttendance)
+  const updatePersonnelCheckin = useAppStore((s) => s.updatePersonnelCheckin)
+  const updatePropCheckin = useAppStore((s) => s.updatePropCheckin)
+  const updateCostumeCheckin = useAppStore((s) => s.updateCostumeCheckin)
+  const personnelCheckins = useAppStore((s) => s.personnelCheckins.filter((c) => c.eventId === id))
+  const propCheckins = useAppStore((s) => s.propCheckins.filter((c) => c.eventId === id))
+  const costumeCheckins = useAppStore((s) => s.costumeCheckins.filter((c) => c.eventId === id))
 
   const [showAssignmentModal, setShowAssignmentModal] = useState(false)
   const [newAssignment, setNewAssignment] = useState({ personnelId: '', role: '' })
@@ -351,7 +360,62 @@ function EventDetail() {
   const totalAudience = attendance.reduce((s, a) => s + a.totalAudience, 0)
 
   const unresolvedIncidents = incidents.filter((i) => !i.handled)
-  const sortedTimeline = [...timeline].sort((a, b) => parseISO(a.timestamp).getTime() - parseISO(b.timestamp).getTime())
+  const sortedTimeline = useMemo(
+    () => [...timeline].sort((a, b) => parseISO(a.timestamp).getTime() - parseISO(b.timestamp).getTime()),
+    [timeline],
+  )
+
+  const timelineTypeColors: Record<string, string> = {
+    arrival: 'bg-blue-500',
+    check_complete: 'bg-green-500',
+    ticket_open: 'bg-amber-500',
+    entrance: 'bg-purple-500',
+    curtain_up: 'bg-pink-500',
+    intermission: 'bg-slate-500',
+    curtain_down: 'bg-slate-700',
+    incident: 'bg-red-500',
+    incident_resolved: 'bg-green-600',
+    other: 'bg-slate-400',
+  }
+
+  type MixedTimelineItem =
+    | { kind: 'timeline'; data: TimelineEvent }
+    | { kind: 'log'; data: PerformanceLog }
+    | { kind: 'incident'; data: IncidentRecord }
+    | { kind: 'incident_resolved'; data: IncidentRecord }
+    | { kind: 'ticket'; data: TicketSale }
+    | { kind: 'comp'; data: ComplementaryTicket }
+    | { kind: 'attendance'; data: AttendanceRecord }
+    | { kind: 'check'; data: CheckItem }
+
+  const mixedTimeline = useMemo<MixedTimelineItem[]>(() => {
+    const items: MixedTimelineItem[] = []
+    timeline.forEach((t) => items.push({ kind: 'timeline', data: t }))
+    logs.forEach((l) => items.push({ kind: 'log', data: l }))
+    incidents.forEach((i) => {
+      items.push({ kind: 'incident', data: i })
+      if (i.handled) items.push({ kind: 'incident_resolved', data: i })
+    })
+    ticketSales.forEach((t) => items.push({ kind: 'ticket', data: t }))
+    complementaryTickets.forEach((t) => items.push({ kind: 'comp', data: t }))
+    attendance.forEach((a) => items.push({ kind: 'attendance', data: a }))
+    checkItems.filter((c) => c.checked && c.checkedAt).forEach((c) => items.push({ kind: 'check', data: c }))
+
+    const getTs = (item: MixedTimelineItem): number => {
+      switch (item.kind) {
+        case 'timeline': return parseISO(item.data.timestamp).getTime()
+        case 'log': return parseISO(item.data.timestamp).getTime()
+        case 'incident': return parseISO(item.data.timestamp).getTime()
+        case 'incident_resolved': return parseISO(item.data.timestamp).getTime() + 1
+        case 'ticket': return parseISO(item.data.soldAt).getTime()
+        case 'comp': return parseISO(item.data.issuedAt).getTime()
+        case 'attendance': return parseISO(item.data.recordedAt).getTime()
+        case 'check': return parseISO(item.data.checkedAt!).getTime()
+      }
+    }
+
+    return items.sort((a, b) => getTs(a) - getTs(b))
+  }, [timeline, logs, incidents, ticketSales, complementaryTickets, attendance, checkItems])
 
   const handleAddAssignment = () => {
     if (newAssignment.personnelId && newAssignment.role && id) {
@@ -397,7 +461,15 @@ function EventDetail() {
 
   const handleAddLog = () => {
     if (!logForm.content || !id) return
-    addLog({ eventId: id, timestamp: new Date().toISOString(), content: logForm.content, category: logForm.category })
+    const now = new Date().toISOString()
+    addLog({ eventId: id, timestamp: now, content: logForm.content, category: logForm.category })
+    addTimelineEvent({
+      eventId: id,
+      type: 'other',
+      timestamp: now,
+      title: `日志：${logForm.content.slice(0, 20)}${logForm.content.length > 20 ? '...' : ''}`,
+      description: logForm.content,
+    })
     setLogForm({ content: '', category: 'info' })
     setShowLogModal(false)
   }
@@ -1014,22 +1086,46 @@ function EventDetail() {
               <h4 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
                 <Users className="w-4 h-4 text-blue-500" />
                 人员到场确认
-                <span className="text-xs text-slate-400 font-normal">（{eventAssignments.length} 人排班）</span>
+                <span className="text-xs text-slate-400 font-normal">
+                  （{personnelCheckins.filter(c => c.confirmed).length}/{eventAssignments.length} 已确认）
+                </span>
               </h4>
               <div className="grid grid-cols-2 gap-2">
                 {eventAssignments.length === 0 ? (
                   <p className="text-slate-400 text-sm col-span-2 text-center py-3">暂无排班人员</p>
                 ) : (
-                  eventAssignments.map((a) => (
-                    <label key={a.id} className="flex items-center gap-3 p-3 rounded-lg hover:bg-slate-50 cursor-pointer border border-slate-100">
-                      <input type="checkbox" className="w-4 h-4 rounded border-slate-300 text-amber-500 focus:ring-amber-500" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-slate-800">{a.name}</p>
-                        <p className="text-xs text-slate-500">{a.role}</p>
-                      </div>
-                      {a.onLeave && <Badge variant="danger" className="text-[10px]">请假</Badge>}
-                    </label>
-                  ))
+                  eventAssignments.map((a) => {
+                    const checkin = personnelCheckins.find((c) => c.assignmentId === a.id)
+                    return (
+                      <label
+                        key={a.id}
+                        className={cn(
+                          'flex items-center gap-3 p-3 rounded-lg hover:bg-slate-50 cursor-pointer border',
+                          checkin?.confirmed ? 'bg-green-50 border-green-200' : 'border-slate-100',
+                        )}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checkin?.confirmed || false}
+                          onChange={(e) => updatePersonnelCheckin(a.id, {
+                            confirmed: e.target.checked,
+                            confirmedAt: e.target.checked ? new Date().toISOString() : undefined,
+                          })}
+                          className="w-4 h-4 rounded border-slate-300 text-amber-500 focus:ring-amber-500"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <p className={cn('text-sm font-medium', checkin?.confirmed ? 'text-green-700 line-through' : 'text-slate-800')}>
+                            {a.name}
+                          </p>
+                          <p className="text-xs text-slate-500">{a.role}</p>
+                          {checkin?.confirmedAt && (
+                            <p className="text-[10px] text-green-500 mt-0.5">✓ {formatTime(checkin.confirmedAt)} 已确认</p>
+                          )}
+                        </div>
+                        {a.onLeave && <Badge variant="danger" className="text-[10px]">请假</Badge>}
+                      </label>
+                    )
+                  })
                 )}
               </div>
             </section>
@@ -1038,7 +1134,9 @@ function EventDetail() {
               <h4 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
                 <Package className="w-4 h-4 text-amber-500" />
                 道具到位确认
-                <span className="text-xs text-slate-400 font-normal">（{eventPropAssignments.length} 项）</span>
+                <span className="text-xs text-slate-400 font-normal">
+                  （{propCheckins.filter(c => c.confirmed).length}/{eventPropAssignments.length} 已确认）
+                </span>
               </h4>
               <div className="space-y-2">
                 {eventPropAssignments.length === 0 ? (
@@ -1046,12 +1144,32 @@ function EventDetail() {
                 ) : (
                   eventPropAssignments.map((a) => {
                     const prop = allProps.find((p) => p.id === a.propId)
+                    const checkin = propCheckins.find((c) => c.assignmentId === a.id)
                     return (
-                      <label key={a.id} className="flex items-center gap-3 p-3 rounded-lg hover:bg-slate-50 cursor-pointer border border-slate-100">
-                        <input type="checkbox" className="w-4 h-4 rounded border-slate-300 text-amber-500 focus:ring-amber-500" />
+                      <label
+                        key={a.id}
+                        className={cn(
+                          'flex items-center gap-3 p-3 rounded-lg hover:bg-slate-50 cursor-pointer border',
+                          checkin?.confirmed ? 'bg-green-50 border-green-200' : 'border-slate-100',
+                        )}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checkin?.confirmed || false}
+                          onChange={(e) => updatePropCheckin(a.id, {
+                            confirmed: e.target.checked,
+                            confirmedAt: e.target.checked ? new Date().toISOString() : undefined,
+                          })}
+                          className="w-4 h-4 rounded border-slate-300 text-amber-500 focus:ring-amber-500"
+                        />
                         <div className="flex-1">
-                          <p className="text-sm font-medium text-slate-800">{prop?.name || '未知道具'}</p>
+                          <p className={cn('text-sm font-medium', checkin?.confirmed ? 'text-green-700 line-through' : 'text-slate-800')}>
+                            {prop?.name || '未知道具'}
+                          </p>
                           <p className="text-xs text-slate-500">{prop?.category || ''} · 数量 {a.quantity}</p>
+                          {checkin?.confirmedAt && (
+                            <p className="text-[10px] text-green-500 mt-0.5">✓ {formatTime(checkin.confirmedAt)} 已确认</p>
+                          )}
                         </div>
                         {a.notes && <span className="text-xs text-slate-400">{a.notes}</span>}
                       </label>
@@ -1065,7 +1183,9 @@ function EventDetail() {
               <h4 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
                 <Shirt className="w-4 h-4 text-purple-500" />
                 服装到位确认
-                <span className="text-xs text-slate-400 font-normal">（{eventCostumeAssignments.length} 项）</span>
+                <span className="text-xs text-slate-400 font-normal">
+                  （{costumeCheckins.filter(c => c.confirmed).length}/{eventCostumeAssignments.length} 已确认）
+                </span>
               </h4>
               <div className="space-y-2">
                 {eventCostumeAssignments.length === 0 ? (
@@ -1073,12 +1193,32 @@ function EventDetail() {
                 ) : (
                   eventCostumeAssignments.map((a) => {
                     const costume = allCostumes.find((c) => c.id === a.costumeId)
+                    const checkin = costumeCheckins.find((c) => c.assignmentId === a.id)
                     return (
-                      <label key={a.id} className="flex items-center gap-3 p-3 rounded-lg hover:bg-slate-50 cursor-pointer border border-slate-100">
-                        <input type="checkbox" className="w-4 h-4 rounded border-slate-300 text-amber-500 focus:ring-amber-500" />
+                      <label
+                        key={a.id}
+                        className={cn(
+                          'flex items-center gap-3 p-3 rounded-lg hover:bg-slate-50 cursor-pointer border',
+                          checkin?.confirmed ? 'bg-green-50 border-green-200' : 'border-slate-100',
+                        )}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checkin?.confirmed || false}
+                          onChange={(e) => updateCostumeCheckin(a.id, {
+                            confirmed: e.target.checked,
+                            confirmedAt: e.target.checked ? new Date().toISOString() : undefined,
+                          })}
+                          className="w-4 h-4 rounded border-slate-300 text-amber-500 focus:ring-amber-500"
+                        />
                         <div className="flex-1">
-                          <p className="text-sm font-medium text-slate-800">{costume?.name || '未知服装'}</p>
+                          <p className={cn('text-sm font-medium', checkin?.confirmed ? 'text-green-700 line-through' : 'text-slate-800')}>
+                            {costume?.name || '未知服装'}
+                          </p>
                           <p className="text-xs text-slate-500">{costume?.character || ''} · {costume?.size || ''} · 数量 {a.quantity}</p>
+                          {checkin?.confirmedAt && (
+                            <p className="text-[10px] text-green-500 mt-0.5">✓ {formatTime(checkin.confirmedAt)} 已确认</p>
+                          )}
                         </div>
                         {a.notes && <span className="text-xs text-slate-400">{a.notes}</span>}
                       </label>
@@ -1090,128 +1230,115 @@ function EventDetail() {
 
             <section>
               <h4 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
-                <ClipboardList className="w-4 h-4 text-green-500" />
-                灯光音响检查
-                <span className="text-xs text-slate-400 font-normal">（{checkItems.filter(c => c.checked).length}/{checkItems.length} 已完成）</span>
-              </h4>
-              <div className="space-y-4">
-                {['lighting', 'sound', 'stage', 'other'].map((cat) => {
-                  const catItems = checkItems.filter((c) => c.category === cat)
-                  if (catItems.length === 0) return null
-                  const catLabel = { lighting: '灯光', sound: '音响', stage: '舞台', other: '其他' }[cat]
-                  return (
-                    <div key={cat}>
-                      <p className="text-xs text-slate-500 font-medium mb-2">{catLabel}</p>
-                      <div className="space-y-1">
-                        {catItems.map((item) => (
-                          <label key={item.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-slate-50 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={item.checked}
-                              onChange={() => toggleCheckItem(item.id)}
-                              className="w-4 h-4 rounded border-slate-300 text-amber-500 focus:ring-amber-500"
-                            />
-                            <span className={cn('text-sm flex-1', item.checked ? 'text-slate-400 line-through' : 'text-slate-700')}>
-                              {item.name}
-                            </span>
-                            {item.checkedAt && <span className="text-[10px] text-slate-400">{formatTime(item.checkedAt)}</span>}
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                  )
-                })}
-                {checkItems.length === 0 && (
-                  <p className="text-slate-400 text-sm text-center py-3">暂无检查项</p>
-                )}
-              </div>
-            </section>
-
-            <section>
-              <h4 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
-                <Ticket className="w-4 h-4 text-emerald-500" />
-                票务 & 入场
-              </h4>
-              <div className="grid grid-cols-3 gap-3 mb-3">
-                <div className="p-3 rounded-lg bg-green-50 text-center">
-                  <p className="text-2xl font-bold text-green-700">{totalTickets}</p>
-                  <p className="text-xs text-green-600">已售票</p>
-                </div>
-                <div className="p-3 rounded-lg bg-amber-50 text-center">
-                  <p className="text-2xl font-bold text-amber-700">{totalComp}</p>
-                  <p className="text-xs text-amber-600">赠票</p>
-                </div>
-                <div className="p-3 rounded-lg bg-blue-50 text-center">
-                  <p className="text-2xl font-bold text-blue-700">{totalAudience}</p>
-                  <p className="text-xs text-blue-600">入场</p>
-                </div>
-              </div>
-              {ticketSales.length > 0 && (
-                <div className="text-xs text-slate-500">
-                  票房收入：<span className="font-medium text-slate-700">¥{totalRevenue.toLocaleString()}</span>
-                </div>
-              )}
-            </section>
-
-            {incidents.length > 0 && (
-              <section>
-                <h4 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4 text-red-500" />
-                  事故记录
-                  <span className="text-xs text-slate-400 font-normal">（{incidents.length} 条）</span>
-                </h4>
-                <div className="space-y-2">
-                  {incidents.map((i) => (
-                    <div key={i.id} className="p-3 rounded-lg border border-slate-100">
-                      <div className="flex items-center justify-between">
-                        <p className="text-sm font-medium text-slate-800">{i.title}</p>
-                        <Badge variant={i.handled ? 'success' : 'danger'} className="text-[10px]">
-                          {i.handled ? '已处理' : '待处理'}
-                        </Badge>
-                      </div>
-                      <p className="text-xs text-slate-500 mt-1">
-                        {formatDateTime(i.timestamp)} · {{ minor: '轻微', moderate: '一般', serious: '严重' }[i.severity]}
-                      </p>
-                      {i.description && <p className="text-xs text-slate-600 mt-1">{i.description}</p>}
-                      {i.handled && i.resolution && (
-                        <p className="text-xs text-green-600 mt-2 pt-2 border-t border-slate-100">处理结果：{i.resolution}</p>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </section>
-            )}
-
-            <section>
-              <h4 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
                 <Clock className="w-4 h-4 text-violet-500" />
-                执行时间线
+                执行全记录（按时间顺序）
+                <span className="text-xs text-slate-400 font-normal">
+                  含检查、票务、日志、事故、时间线节点
+                </span>
               </h4>
               <div className="relative pl-6">
                 <div className="absolute left-2.5 top-1 bottom-1 w-0.5 bg-slate-200" />
-                {sortedTimeline.length === 0 ? (
-                  <p className="text-slate-400 text-sm">暂无时间线记录</p>
+                {mixedTimeline.length === 0 ? (
+                  <p className="text-slate-400 text-sm">暂无执行记录</p>
                 ) : (
-                  sortedTimeline.map((t) => (
-                    <div key={t.id} className="relative pb-4 last:pb-0">
-                      <div className={cn('absolute -left-1 top-1 w-4 h-4 rounded-full border-2 border-white shadow', timelineTypeColors[t.type])} />
-                      <div className="ml-4">
-                        <div className="flex items-center gap-2">
-                          <Badge variant="default" className="text-[10px]">{timelineTypeLabels[t.type]}</Badge>
-                          <span className="font-medium text-slate-800 text-sm">{t.title}</span>
+                  mixedTimeline.map((item, idx) => {
+                    const getInfo = () => {
+                      switch (item.kind) {
+                        case 'timeline':
+                          return {
+                            color: timelineTypeColors[item.data.type] || 'bg-slate-400',
+                            badge: timelineTypeLabels[item.data.type],
+                            title: item.data.title,
+                            description: item.data.description,
+                            time: item.data.timestamp,
+                          }
+                        case 'log':
+                          return {
+                            color: item.data.category === 'warning' ? 'bg-amber-500' : item.data.category === 'action' ? 'bg-green-500' : 'bg-blue-400',
+                            badge: `日志·${{ info: '信息', warning: '警告', action: '操作' }[item.data.category]}`,
+                            title: item.data.content,
+                            description: '',
+                            time: item.data.timestamp,
+                          }
+                        case 'incident':
+                          return {
+                            color: 'bg-red-500',
+                            badge: `事故·${{ minor: '轻微', moderate: '一般', serious: '严重' }[item.data.severity]}`,
+                            title: item.data.title,
+                            description: item.data.description,
+                            time: item.data.timestamp,
+                          }
+                        case 'incident_resolved':
+                          return {
+                            color: 'bg-green-600',
+                            badge: '事故解决',
+                            title: `${item.data.title}（已处理）`,
+                            description: item.data.resolution,
+                            time: item.data.timestamp,
+                          }
+                        case 'ticket':
+                          return {
+                            color: 'bg-emerald-500',
+                            badge: '售票',
+                            title: `${({ normal: '普通票', vip: 'VIP票', student: '学生票' } as Record<string, string>)[item.data.type]} ×${item.data.quantity}，¥${item.data.total.toLocaleString()}`,
+                            description: item.data.soldBy ? `售票人：${item.data.soldBy}` : '',
+                            time: item.data.soldAt,
+                          }
+                        case 'comp':
+                          return {
+                            color: 'bg-amber-500',
+                            badge: '赠票',
+                            title: `${item.data.recipient} ×${item.data.quantity}张（${item.data.reason}）`,
+                            description: item.data.issuedBy ? `登记人：${item.data.issuedBy}` : '',
+                            time: item.data.issuedAt,
+                          }
+                        case 'attendance':
+                          return {
+                            color: 'bg-blue-500',
+                            badge: '入场统计',
+                            title: `共 ${item.data.totalAudience} 人入场（普票 ${item.data.normalTickets} / VIP ${item.data.vipTickets} / 学生 ${item.data.studentTickets} / 赠票 ${item.data.complementaryTickets}）`,
+                            description: '',
+                            time: item.data.recordedAt,
+                          }
+                        case 'check':
+                          return {
+                            color: 'bg-green-500',
+                            badge: `检查完成·${{ lighting: '灯光', sound: '音响', stage: '舞台', other: '其他' }[item.data.category]}`,
+                            title: `${item.data.name} ✓`,
+                            description: item.data.checkedBy ? `检查人：${item.data.checkedBy}` : '',
+                            time: item.data.checkedAt!,
+                          }
+                      }
+                    }
+                    const info = getInfo()
+                    return (
+                      <div key={`${item.kind}-${idx}`} className="relative pb-4 last:pb-0">
+                        <div className={cn('absolute -left-1 top-1 w-4 h-4 rounded-full border-2 border-white shadow', info.color)} />
+                        <div className="ml-4">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <Badge variant="default" className="text-[10px]">{info.badge}</Badge>
+                            <span className="font-medium text-slate-800 text-sm">{info.title}</span>
+                          </div>
+                          <p className="text-xs text-slate-500 mt-0.5">{formatDateTime(info.time)}</p>
+                          {info.description && <p className="text-xs text-slate-600 mt-1">{info.description}</p>}
                         </div>
-                        <p className="text-xs text-slate-500 mt-0.5">{formatDateTime(t.timestamp)}</p>
-                        {t.description && <p className="text-xs text-slate-600 mt-1">{t.description}</p>}
                       </div>
-                    </div>
-                  ))
+                    )
+                  })
                 )}
               </div>
             </section>
           </div>
 
           <div className="mt-8 pt-4 border-t border-slate-200 flex justify-between items-center">
-            <p className="text-xs text-slate-400">执行单生成时间：{formatDateTime(new Date().toISOString())}</p>
+            <div className="text-xs text-slate-400 space-y-1">
+              <p>执行单生成时间：{formatDateTime(new Date().toISOString())}</p>
+              <p>确认进度：
+                人员 {personnelCheckins.filter(c => c.confirmed).length}/{eventAssignments.length} ·
+                道具 {propCheckins.filter(c => c.confirmed).length}/{eventPropAssignments.length} ·
+                服装 {costumeCheckins.filter(c => c.confirmed).length}/{eventCostumeAssignments.length}
+              </p>
+            </div>
             <Button onClick={handleExportPack}>
               <Download className="w-4 h-4" />
               导出执行单

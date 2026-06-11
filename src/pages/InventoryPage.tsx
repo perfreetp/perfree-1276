@@ -480,7 +480,7 @@ function PropsList() {
             const targetDate = parseISO(targetEvent.start)
             const sameDayAssignments = eventPropAssignments.filter((a) => {
               const ev = events.find((e) => e.id === a.eventId)
-              return ev && isSameDay(parseISO(ev.start), targetDate)
+              return ev && a.propId === assignTargetId && isSameDay(parseISO(ev.start), targetDate)
             })
             const usedQty = sameDayAssignments.reduce((sum, a) => sum + a.quantity, 0)
             const remainingQty = prop.quantity - usedQty
@@ -495,7 +495,7 @@ function PropsList() {
                     ? <AlertTriangle className="w-5 h-5 text-red-500" />
                     : <CheckCircle2 className="w-5 h-5 text-green-500" />}
                   <span className={cn('font-medium', isOver ? 'text-red-700' : 'text-green-700')}>
-                    {formatDate(targetDate)} 资源占用情况
+                    {formatDate(targetDate)} 「{prop.name}」占用情况
                   </span>
                 </div>
                 <div className="grid grid-cols-3 gap-3 mb-3">
@@ -516,7 +516,7 @@ function PropsList() {
                 </div>
                 {sameDayAssignments.length > 0 && (
                   <div>
-                    <p className="text-xs text-slate-500 font-medium mb-1.5">当日分配明细：</p>
+                    <p className="text-xs text-slate-500 font-medium mb-1.5">当日已分配场次：</p>
                     <div className="space-y-1">
                       {sameDayAssignments.map((a) => {
                         const ev = events.find((e) => e.id === a.eventId)
@@ -531,10 +531,18 @@ function PropsList() {
                   </div>
                 )}
                 {isOver && (
-                  <p className="text-xs text-red-600 mt-3 flex items-start gap-1">
-                    <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
-                    <span>数量不足：还需要 {assignForm.quantity} 件，但当日只剩 {remainingQty} 件可用（超出 {assignForm.quantity - remainingQty} 件）</span>
-                  </p>
+                  <div className="mt-3 pt-3 border-t border-red-200">
+                    <p className="text-xs text-red-700 font-medium mb-1.5 flex items-start gap-1">
+                      <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                      <span>数量不足：还需要 {assignForm.quantity} 件，但当日只剩 {remainingQty} 件可用（超出 {assignForm.quantity - remainingQty} 件）</span>
+                    </p>
+                    <p className="text-[11px] text-red-600">
+                      冲突场次：{sameDayAssignments.map((a) => {
+                        const ev = events.find((e) => e.id === a.eventId)
+                        return `${ev?.title || '未知'}（占用 ${a.quantity} 件）`
+                      }).join('、')}
+                    </p>
+                  </div>
                 )}
               </div>
             )
@@ -881,7 +889,7 @@ function CostumesList() {
                       const targetDate = parseISO(targetEvent.start)
                       const sameDayAssignments = eventCostumeAssignments.filter((a) => {
                         const ev = events.find((e) => e.id === a.eventId)
-                        return ev && isSameDay(parseISO(ev.start), targetDate)
+                        return ev && a.costumeId === assignTargetId && isSameDay(parseISO(ev.start), targetDate)
                       })
                       const usedQty = sameDayAssignments.reduce((sum, a) => sum + a.quantity, 0)
                       return assignForm.quantity > costume.quantity - usedQty
@@ -919,7 +927,7 @@ function CostumesList() {
             const targetDate = parseISO(targetEvent.start)
             const sameDayAssignments = eventCostumeAssignments.filter((a) => {
               const ev = events.find((e) => e.id === a.eventId)
-              return ev && isSameDay(parseISO(ev.start), targetDate)
+              return ev && a.costumeId === assignTargetId && isSameDay(parseISO(ev.start), targetDate)
             })
             const usedQty = sameDayAssignments.reduce((sum, a) => sum + a.quantity, 0)
             const remainingQty = costume.quantity - usedQty
@@ -934,7 +942,7 @@ function CostumesList() {
                     ? <AlertTriangle className="w-5 h-5 text-red-500" />
                     : <CheckCircle2 className="w-5 h-5 text-green-500" />}
                   <span className={cn('font-medium', isOver ? 'text-red-700' : 'text-green-700')}>
-                    {formatDate(targetDate)} 资源占用情况
+                    {formatDate(targetDate)} 「{costume.name}」占用情况
                   </span>
                 </div>
                 <div className="grid grid-cols-3 gap-3 mb-3">
@@ -955,7 +963,7 @@ function CostumesList() {
                 </div>
                 {sameDayAssignments.length > 0 && (
                   <div>
-                    <p className="text-xs text-slate-500 font-medium mb-1.5">当日分配明细：</p>
+                    <p className="text-xs text-slate-500 font-medium mb-1.5">当日已分配场次：</p>
                     <div className="space-y-1">
                       {sameDayAssignments.map((a) => {
                         const ev = events.find((e) => e.id === a.eventId)
@@ -970,10 +978,18 @@ function CostumesList() {
                   </div>
                 )}
                 {isOver && (
-                  <p className="text-xs text-red-600 mt-3 flex items-start gap-1">
-                    <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
-                    <span>数量不足：还需要 {assignForm.quantity} 件，但当日只剩 {remainingQty} 件可用（超出 {assignForm.quantity - remainingQty} 件）</span>
-                  </p>
+                  <div className="mt-3 pt-3 border-t border-red-200">
+                    <p className="text-xs text-red-700 font-medium mb-1.5 flex items-start gap-1">
+                      <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                      <span>数量不足：还需要 {assignForm.quantity} 件，但当日只剩 {remainingQty} 件可用（超出 {assignForm.quantity - remainingQty} 件）</span>
+                    </p>
+                    <p className="text-[11px] text-red-600">
+                      冲突场次：{sameDayAssignments.map((a) => {
+                        const ev = events.find((e) => e.id === a.eventId)
+                        return `${ev?.title || '未知'}（占用 ${a.quantity} 件）`
+                      }).join('、')}
+                    </p>
+                  </div>
                 )}
               </div>
             )

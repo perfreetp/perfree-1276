@@ -222,3 +222,33 @@ export interface Expense {
   eventId?: string
   recordedBy?: string
 }
+
+export interface PersonnelCheckin {
+  id: string
+  eventId: string
+  assignmentId: string
+  personnelId: string
+  confirmed: boolean
+  confirmedAt?: string
+  notes?: string
+}
+
+export interface PropCheckin {
+  id: string
+  eventId: string
+  assignmentId: string
+  propId: string
+  confirmed: boolean
+  confirmedAt?: string
+  notes?: string
+}
+
+export interface CostumeCheckin {
+  id: string
+  eventId: string
+  assignmentId: string
+  costumeId: string
+  confirmed: boolean
+  confirmedAt?: string
+  notes?: string
+}

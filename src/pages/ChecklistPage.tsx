@@ -322,6 +322,7 @@ function LogsSection() {
   const logs = useAppStore((s) => s.logs)
   const events = useAppStore((s) => s.events)
   const addLog = useAppStore((s) => s.addLog)
+  const addTimelineEvent = useAppStore((s) => s.addTimelineEvent)
 
   const [showModal, setShowModal] = useState(false)
   const [formData, setFormData] = useState({
@@ -334,11 +335,22 @@ function LogsSection() {
 
   const handleSave = () => {
     if (!formData.content) return
+    const now = new Date().toISOString()
+    const eventId = formData.eventId || undefined
     addLog({
       ...formData,
-      eventId: formData.eventId || undefined,
-      timestamp: new Date().toISOString(),
+      eventId,
+      timestamp: now,
     })
+    if (eventId) {
+      addTimelineEvent({
+        eventId,
+        type: 'other',
+        timestamp: now,
+        title: `日志：${formData.content.slice(0, 20)}${formData.content.length > 20 ? '...' : ''}`,
+        description: formData.content,
+      })
+    }
     setShowModal(false)
     setFormData({ eventId: '', content: '', category: 'info' })
   }
