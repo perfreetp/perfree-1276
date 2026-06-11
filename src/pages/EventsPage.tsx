@@ -1,7 +1,6 @@
-import { useState, useMemo } from 'react'
+import { useState } from 'react'
 import { Routes, Route, useParams, useNavigate } from 'react-router-dom'
-import { parseISO, format, isAfter, isBefore } from 'date-fns'
-import { zhCN } from 'date-fns/locale'
+import { parseISO, format, isAfter, isBefore, isWithinInterval } from 'date-fns'
 import {
   ArrowLeft,
   Users,
@@ -15,6 +14,12 @@ import {
   Plus,
   Trash2,
   Film,
+  Check,
+  AlertTriangle,
+  CalendarX,
+  DollarSign,
+  MessageSquare,
+  Download,
 } from 'lucide-react'
 import { useAppStore } from '../store'
 import Card from '../components/Card'
@@ -22,9 +27,10 @@ import Button from '../components/Button'
 import Badge from '../components/Badge'
 import Input from '../components/Input'
 import Select from '../components/Select'
+import TextArea from '../components/TextArea'
 import Modal from '../components/Modal'
-import { cn, formatDateTime, formatTime } from '../lib/utils'
-import type { EventType, Assignment } from '../types'
+import { cn, formatDateTime, formatTime, formatDate, exportToCSV } from '../lib/utils'
+import type { EventType, Assignment, PerformanceLog, IncidentRecord, CheckItem } from '../types'
 
 const eventTypeLabels: Record<EventType, string> = {
   show: '演出',
@@ -56,15 +62,12 @@ function EventsList() {
   const [filter, setFilter] = useState<EventType | 'all'>('all')
   const [search, setSearch] = useState('')
 
-  const filteredEvents = useMemo(() => {
-    return events
-      .filter((e) => (filter === 'all' ? true : e.type === filter))
-      .filter((e) => (search ? e.title.toLowerCase().includes(search.toLowerCase()) : true))
-      .sort((a, b) => parseISO(a.start).getTime() - parseISO(b.start).getTime())
-  }, [events, filter, search])
+  const filteredEvents = events
+    .filter((e) => (filter === 'all' ? true : e.type === filter))
+    .filter((e) => (search ? e.title.toLowerCase().includes(search.toLowerCase()) : true))
+    .sort((a, b) => parseISO(a.start).getTime() - parseISO(b.start).getTime())
 
   const now = new Date()
-
   const upcoming = filteredEvents.filter((e) => isAfter(parseISO(e.start), now))
   const ongoing = filteredEvents.filter(
     (e) => isBefore(parseISO(e.start), now) && isAfter(parseISO(e.end), now),
@@ -75,9 +78,8 @@ function EventsList() {
     <div className="space-y-6">
       <div>
         <h2 className="text-2xl font-bold text-slate-800">场次详情</h2>
-        <p className="text-sm text-slate-500 mt-1">查看和管理所有场次的详细信息</p>
+        <p className="text-sm text-slate-500 mt-1">点击场次进入当天执行面板</p>
       </div>
-
       <div className="flex gap-4 flex-wrap">
         <div className="w-64">
           <Input placeholder="搜索场次..." value={search} onChange={(e) => setSearch(e.target.value)} />
@@ -95,7 +97,6 @@ function EventsList() {
           ]}
         />
       </div>
-
       {ongoing.length > 0 && (
         <Card title="进行中" subtitle={`${ongoing.length} 个场次正在进行`}>
           <div className="space-y-3">
@@ -105,7 +106,6 @@ function EventsList() {
           </div>
         </Card>
       )}
-
       <Card title="即将开始" subtitle={`${upcoming.length} 个场次待执行`}>
         {upcoming.length === 0 ? (
           <p className="text-slate-400 text-center py-8">暂无即将开始的场次</p>
@@ -117,7 +117,6 @@ function EventsList() {
           </div>
         )}
       </Card>
-
       <Card title="已完成" subtitle={`${past.length} 个场次已结束`}>
         {past.length === 0 ? (
           <p className="text-slate-400 text-center py-8">暂无已完成的场次</p>
@@ -133,17 +132,7 @@ function EventsList() {
   )
 }
 
-function EventRow({
-  event,
-  show,
-  onClick,
-  muted,
-}: {
-  event: any
-  show?: any
-  onClick: () => void
-  muted?: boolean
-}) {
+function EventRow({ event, show, onClick, muted }: { event: any; show?: any; onClick: () => void; muted?: boolean }) {
   return (
     <div
       onClick={onClick}
@@ -186,79 +175,229 @@ function EventRow({
 function EventDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
+
   const event = useAppStore((s) => s.events.find((e) => e.id === id))
-  const show = useAppStore((s) => s.shows.find((s) => s.id === event?.showId))
+  const shows = useAppStore((s) => s.shows)
+  const show = shows.find((s) => s.id === event?.showId)
   const personnel = useAppStore((s) => s.personnel)
-  const props = useAppStore((s) => s.props)
-  const costumes = useAppStore((s) => s.costumes)
+  const allProps = useAppStore((s) => s.props)
+  const allCostumes = useAppStore((s) => s.costumes)
   const checkItems = useAppStore((s) => s.checkItems)
   const assignments = useAppStore((s) => s.assignments.filter((a) => a.eventId === id))
+  const leaves = useAppStore((s) => s.leaves)
+  const ticketSales = useAppStore((s) => s.ticketSales.filter((t) => t.eventId === id))
+  const complementaryTickets = useAppStore((s) => s.complementaryTickets.filter((t) => t.eventId === id))
+  const attendance = useAppStore((s) => s.attendance.filter((a) => a.eventId === id))
+  const logs = useAppStore((s) => s.logs.filter((l) => l.eventId === id))
+  const incidents = useAppStore((s) => s.incidents.filter((i) => i.eventId === id))
+
   const addAssignment = useAppStore((s) => s.addAssignment)
   const deleteAssignment = useAppStore((s) => s.deleteAssignment)
   const toggleCheckItem = useAppStore((s) => s.toggleCheckItem)
+  const addLog = useAppStore((s) => s.addLog)
+  const addIncident = useAppStore((s) => s.addIncident)
+  const updateIncident = useAppStore((s) => s.updateIncident)
 
   const [showAssignmentModal, setShowAssignmentModal] = useState(false)
   const [newAssignment, setNewAssignment] = useState({ personnelId: '', role: '' })
+
+  const [showLogModal, setShowLogModal] = useState(false)
+  const [logForm, setLogForm] = useState({ content: '', category: 'info' as PerformanceLog['category'] })
+
+  const [showIncidentModal, setShowIncidentModal] = useState(false)
+  const [incidentForm, setIncidentForm] = useState({ title: '', description: '', severity: 'minor' as IncidentRecord['severity'] })
+
+  const [showHandleModal, setShowHandleModal] = useState(false)
+  const [handleTarget, setHandleTarget] = useState<string | null>(null)
+  const [resolution, setResolution] = useState('')
 
   if (!event) {
     return (
       <div className="text-center py-16">
         <p className="text-slate-500">场次不存在</p>
-        <Button className="mt-4" onClick={() => navigate('/events')}>
-          返回列表
-        </Button>
+        <Button className="mt-4" onClick={() => navigate('/events')}>返回列表</Button>
       </div>
     )
   }
 
-  const eventProps = props.filter((p) => p.status === 'in_use')
-  const eventCostumes = costumes.filter((c) => c.status === 'in_use')
+  const eventAssignments = assignments.map((a) => {
+    const p = personnel.find((per) => per.id === a.personnelId)
+    const onLeave = p && leaves.some(
+      (l) =>
+        l.status !== 'rejected' &&
+        l.personnelId === p.id &&
+        isWithinInterval(parseISO(event.start), {
+          start: parseISO(l.startDate),
+          end: new Date(parseISO(l.endDate).getTime() + 86400000),
+        }),
+    )
+    return { ...a, name: p?.name || '未知', role_label: p?.role || '', onLeave }
+  })
 
   const lightingChecks = checkItems.filter((c) => c.category === 'lighting')
   const soundChecks = checkItems.filter((c) => c.category === 'sound')
   const stageChecks = checkItems.filter((c) => c.category === 'stage')
+  const allChecked = checkItems.length > 0 && checkItems.every((c) => c.checked)
+  const checkedRatio = checkItems.length > 0 ? Math.round((checkItems.filter((c) => c.checked).length / checkItems.length) * 100) : 0
+
+  const totalTickets = ticketSales.reduce((s, t) => s + t.quantity, 0)
+  const totalRevenue = ticketSales.reduce((s, t) => s + t.total, 0)
+  const totalComp = complementaryTickets.reduce((s, t) => s + t.quantity, 0)
+  const totalAudience = attendance.reduce((s, a) => s + a.totalAudience, 0)
+
+  const unresolvedIncidents = incidents.filter((i) => !i.handled)
 
   const handleAddAssignment = () => {
     if (newAssignment.personnelId && newAssignment.role && id) {
-      addAssignment({
-        eventId: id,
-        personnelId: newAssignment.personnelId,
-        role: newAssignment.role,
-      })
+      addAssignment({ eventId: id, personnelId: newAssignment.personnelId, role: newAssignment.role })
       setNewAssignment({ personnelId: '', role: '' })
       setShowAssignmentModal(false)
     }
   }
 
-  const personnelName = (pid: string) => personnel.find((p) => p.id === pid)?.name || '未知'
+  const handleAddLog = () => {
+    if (!logForm.content || !id) return
+    addLog({ eventId: id, timestamp: new Date().toISOString(), content: logForm.content, category: logForm.category })
+    setLogForm({ content: '', category: 'info' })
+    setShowLogModal(false)
+  }
+
+  const handleAddIncident = () => {
+    if (!incidentForm.title || !incidentForm.description || !id) return
+    addIncident({ eventId: id, timestamp: new Date().toISOString(), title: incidentForm.title, description: incidentForm.description, severity: incidentForm.severity, handled: false })
+    setIncidentForm({ title: '', description: '', severity: 'minor' })
+    setShowIncidentModal(false)
+  }
+
+  const handleResolveIncident = () => {
+    if (handleTarget && resolution) {
+      updateIncident(handleTarget, { handled: true, resolution })
+      setHandleTarget(null)
+      setResolution('')
+      setShowHandleModal(false)
+    }
+  }
+
+  const handleExportPack = () => {
+    const eventName = event.title.replace(/[《》]/g, '')
+    const dateStr = formatDate(event.start)
+
+    const scheduleData = [{
+      类型: eventTypeLabels[event.type],
+      标题: event.title,
+      开始时间: formatDateTime(event.start),
+      结束时间: formatTime(event.end),
+      场地: event.venue || '',
+      备注: event.description || '',
+    }]
+    exportToCSV(scheduleData, `${eventName}_${dateStr}_排期.csv`)
+
+    if (eventAssignments.length > 0) {
+      const personnelData = eventAssignments.map((a) => ({
+        姓名: a.name,
+        岗位: a.role,
+        是否请假: a.onLeave ? '是' : '否',
+      }))
+      exportToCSV(personnelData, `${eventName}_${dateStr}_人员.csv`)
+    }
+
+    const propsInUse = allProps.filter((p) => p.status === 'in_use' || p.status === 'borrowed')
+    if (propsInUse.length > 0) {
+      const propsData = propsInUse.map((p) => ({
+        名称: p.name,
+        分类: p.category,
+        数量: p.quantity,
+        状态: p.status,
+        位置: p.location || '',
+      }))
+      exportToCSV(propsData, `${eventName}_${dateStr}_道具.csv`)
+    }
+
+    const costumesInUse = allCostumes.filter((c) => c.status === 'in_use' || c.status === 'borrowed')
+    if (costumesInUse.length > 0) {
+      const costumesData = costumesInUse.map((c) => ({
+        名称: c.name,
+        角色: c.character || '',
+        尺码: c.size,
+        数量: c.quantity,
+        状态: c.status,
+      }))
+      exportToCSV(costumesData, `${eventName}_${dateStr}_服装.csv`)
+    }
+
+    if (ticketSales.length > 0 || complementaryTickets.length > 0) {
+      const ticketData = [
+        ...ticketSales.map((t) => ({
+          类型: '售票',
+          票种: ({ normal: '普通票', vip: 'VIP票', student: '学生票', complementary: '赠票' } as Record<string, string>)[t.type],
+          数量: t.quantity,
+          单价: t.price,
+          总价: t.total,
+        })),
+        ...complementaryTickets.map((t) => ({
+          类型: '赠票',
+          票种: '赠票',
+          数量: t.quantity,
+          单价: 0,
+          总价: 0,
+          受赠方: t.recipient,
+          事由: t.reason,
+        })),
+      ]
+      exportToCSV(ticketData as any[], `${eventName}_${dateStr}_票务.csv`)
+    }
+
+    const checksData = checkItems.map((c) => ({
+      分类: ({ lighting: '灯光', sound: '音响', stage: '舞台', other: '其他' } as Record<string, string>)[c.category],
+      检查项: c.name,
+      状态: c.checked ? '✓ 已检查' : '✗ 未检查',
+    }))
+    exportToCSV(checksData, `${eventName}_${dateStr}_检查清单.csv`)
+
+    if (logs.length > 0) {
+      const logsData = logs.map((l) => ({
+        时间: formatDateTime(l.timestamp),
+        类型: ({ info: '信息', warning: '警告', action: '操作' } as Record<string, string>)[l.category],
+        内容: l.content,
+      }))
+      exportToCSV(logsData, `${eventName}_${dateStr}_日志.csv`)
+    }
+  }
 
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
-        <button
-          onClick={() => navigate('/events')}
-          className="p-2 rounded-lg hover:bg-slate-200 transition-colors"
-        >
+        <button onClick={() => navigate('/events')} className="p-2 rounded-lg hover:bg-slate-200 transition-colors">
           <ArrowLeft className="w-5 h-5 text-slate-600" />
         </button>
         <div className="flex-1">
           <div className="flex items-center gap-3">
             <Badge variant={eventTypeBadge[event.type]}>{eventTypeLabels[event.type]}</Badge>
             <h2 className="text-2xl font-bold text-slate-800">{event.title}</h2>
-          </div>
-          <div className="flex items-center gap-4 mt-2 text-sm text-slate-500">
-            <span className="flex items-center gap-1">
-              <Clock className="w-4 h-4" />
-              {formatDateTime(event.start)} - {formatTime(event.end)}
-            </span>
-            {event.venue && (
-              <span className="flex items-center gap-1">
-                <MapPin className="w-4 h-4" />
-                {event.venue}
-              </span>
+            {unresolvedIncidents.length > 0 && (
+              <Badge variant="danger">
+                <AlertTriangle className="w-3 h-3 mr-1" />
+                {unresolvedIncidents.length} 事故
+              </Badge>
             )}
           </div>
+          <div className="flex items-center gap-4 mt-2 text-sm text-slate-500">
+            <span className="flex items-center gap-1"><Clock className="w-4 h-4" />{formatDateTime(event.start)} - {formatTime(event.end)}</span>
+            {event.venue && <span className="flex items-center gap-1"><MapPin className="w-4 h-4" />{event.venue}</span>}
+          </div>
         </div>
+        <Button onClick={handleExportPack}>
+          <Download className="w-4 h-4" />
+          导出执行包
+        </Button>
+      </div>
+
+      <div className="grid grid-cols-5 gap-3">
+        <MiniStat label="排班人数" value={eventAssignments.length} icon={<Users className="w-4 h-4 text-blue-500" />} />
+        <MiniStat label="检查进度" value={`${checkedRatio}%`} icon={<ClipboardList className="w-4 h-4 text-amber-500" />} />
+        <MiniStat label="售票数" value={totalTickets} icon={<Ticket className="w-4 h-4 text-green-500" />} />
+        <MiniStat label="入场观众" value={totalAudience} icon={<Users className="w-4 h-4 text-purple-500" />} />
+        <MiniStat label="票房收入" value={`¥${totalRevenue.toLocaleString()}`} icon={<DollarSign className="w-4 h-4 text-amber-500" />} />
       </div>
 
       {show && (
@@ -267,23 +406,11 @@ function EventDetail() {
             <div>
               <h4 className="font-semibold text-lg text-slate-800">{show.title}</h4>
               <p className="text-sm text-slate-500 mt-1">{show.genre} · {show.duration}分钟</p>
-              {show.description && (
-                <p className="text-sm text-slate-600 mt-3 leading-relaxed">{show.description}</p>
-              )}
+              {show.description && <p className="text-sm text-slate-600 mt-3 leading-relaxed">{show.description}</p>}
             </div>
             <div className="space-y-2 text-sm">
-              {show.director && (
-                <div className="flex justify-between py-2 border-b border-slate-100">
-                  <span className="text-slate-500">导演</span>
-                  <span className="text-slate-800 font-medium">{show.director}</span>
-                </div>
-              )}
-              {show.playwright && (
-                <div className="flex justify-between py-2 border-b border-slate-100">
-                  <span className="text-slate-500">编剧</span>
-                  <span className="text-slate-800 font-medium">{show.playwright}</span>
-                </div>
-              )}
+              {show.director && <div className="flex justify-between py-2 border-b border-slate-100"><span className="text-slate-500">导演</span><span className="text-slate-800 font-medium">{show.director}</span></div>}
+              {show.playwright && <div className="flex justify-between py-2 border-b border-slate-100"><span className="text-slate-500">编剧</span><span className="text-slate-800 font-medium">{show.playwright}</span></div>}
             </div>
           </div>
         </Card>
@@ -291,7 +418,15 @@ function EventDetail() {
 
       <div className="grid grid-cols-2 gap-6">
         <Card
-          title="人员排班"
+          title={
+            <div className="flex items-center gap-2">
+              <Users className="w-5 h-5 text-blue-500" />
+              <span>人员排班</span>
+              {eventAssignments.some((a) => a.onLeave) && (
+                <Badge variant="danger">有请假</Badge>
+              )}
+            </div>
+          }
           rightAction={
             <Button size="sm" onClick={() => setShowAssignmentModal(true)}>
               <UserPlus className="w-4 h-4" />
@@ -299,173 +434,251 @@ function EventDetail() {
             </Button>
           }
         >
-          {assignments.length === 0 ? (
+          {eventAssignments.length === 0 ? (
             <p className="text-slate-400 text-center py-6 text-sm">暂无排班人员</p>
           ) : (
             <div className="space-y-2">
-              {assignments.map((a) => (
-                <div
-                  key={a.id}
-                  className="flex items-center justify-between p-3 rounded-lg bg-slate-50 group"
-                >
+              {eventAssignments.map((a) => (
+                <div key={a.id} className="flex items-center justify-between p-3 rounded-lg bg-slate-50 group">
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 bg-gradient-to-br from-blue-400 to-blue-600 rounded-full flex items-center justify-center text-white text-sm font-medium">
-                      {personnelName(a.personnelId)[0]}
+                      {a.name[0]}
                     </div>
                     <div>
-                      <p className="font-medium text-slate-800 text-sm">{personnelName(a.personnelId)}</p>
-                      <p className="text-xs text-slate-500">{a.role}</p>
+                      <p className="font-medium text-slate-800 text-sm">{a.name}</p>
+                      <p className="text-xs text-slate-500">{a.role} · {a.role_label}</p>
                     </div>
                   </div>
-                  <button
-                    onClick={() => deleteAssignment(a.id)}
-                    className="p-1.5 rounded opacity-0 group-hover:opacity-100 hover:bg-red-100 text-slate-400 hover:text-red-500 transition-all"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {a.onLeave && <Badge variant="danger"><CalendarX className="w-3 h-3 mr-1" />请假</Badge>}
+                    <button onClick={() => deleteAssignment(a.id)} className="p-1.5 rounded opacity-0 group-hover:opacity-100 hover:bg-red-100 text-slate-400 hover:text-red-500 transition-all">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
           )}
         </Card>
 
-        <Card title="道具清单">
-          {eventProps.length === 0 ? (
-            <p className="text-slate-400 text-center py-6 text-sm">暂无道具</p>
+        <Card title={<div className="flex items-center gap-2"><ClipboardList className="w-5 h-5 text-amber-500" /><span>灯光音响检查</span>{allChecked && <Badge variant="success">全部完成</Badge>}</div>}>
+          <div className="space-y-4">
+            <CheckSection title="灯光设备" items={lightingChecks} onToggle={toggleCheckItem} />
+            <CheckSection title="音响设备" items={soundChecks} onToggle={toggleCheckItem} />
+            <CheckSection title="舞台设施" items={stageChecks} onToggle={toggleCheckItem} />
+          </div>
+          <div className="mt-4 pt-4 border-t border-slate-100">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-slate-500">总进度</span>
+              <span className="font-medium text-slate-800">{checkedRatio}%</span>
+            </div>
+            <div className="mt-2 h-2 bg-slate-100 rounded-full overflow-hidden">
+              <div className={cn('h-full rounded-full transition-all', allChecked ? 'bg-green-500' : 'bg-amber-500')} style={{ width: `${checkedRatio}%` }} />
+            </div>
+          </div>
+        </Card>
+
+        <Card title={<div className="flex items-center gap-2"><Package className="w-5 h-5 text-amber-500" /><span>道具清单</span></div>}>
+          {allProps.filter((p) => p.status === 'in_use' || p.status === 'borrowed').length === 0 ? (
+            <p className="text-slate-400 text-center py-6 text-sm">暂无在用道具</p>
           ) : (
             <div className="space-y-2">
-              {eventProps.map((p) => (
+              {allProps.filter((p) => p.status === 'in_use' || p.status === 'borrowed').map((p) => (
                 <div key={p.id} className="flex items-center justify-between p-3 rounded-lg bg-slate-50">
                   <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 bg-amber-100 rounded-lg flex items-center justify-center">
-                      <Package className="w-4 h-4 text-amber-600" />
-                    </div>
+                    <div className="w-8 h-8 bg-amber-100 rounded-lg flex items-center justify-center"><Package className="w-4 h-4 text-amber-600" /></div>
                     <div>
                       <p className="font-medium text-slate-800 text-sm">{p.name}</p>
                       <p className="text-xs text-slate-500">{p.category} · 数量: {p.quantity}</p>
                     </div>
                   </div>
-                  <Badge variant="warning">使用中</Badge>
+                  <Badge variant="warning">{p.status === 'in_use' ? '使用中' : '已借出'}</Badge>
                 </div>
               ))}
             </div>
           )}
         </Card>
 
-        <Card title="服装借还">
-          {eventCostumes.length === 0 ? (
-            <p className="text-slate-400 text-center py-6 text-sm">暂无服装</p>
+        <Card title={<div className="flex items-center gap-2"><Shirt className="w-5 h-5 text-purple-500" /><span>服装借还</span></div>}>
+          {allCostumes.filter((c) => c.status === 'in_use' || c.status === 'borrowed').length === 0 ? (
+            <p className="text-slate-400 text-center py-6 text-sm">暂无在用服装</p>
           ) : (
             <div className="space-y-2">
-              {eventCostumes.map((c) => (
+              {allCostumes.filter((c) => c.status === 'in_use' || c.status === 'borrowed').map((c) => (
                 <div key={c.id} className="flex items-center justify-between p-3 rounded-lg bg-slate-50">
                   <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 bg-purple-100 rounded-lg flex items-center justify-center">
-                      <Shirt className="w-4 h-4 text-purple-600" />
-                    </div>
+                    <div className="w-8 h-8 bg-purple-100 rounded-lg flex items-center justify-center"><Shirt className="w-4 h-4 text-purple-600" /></div>
                     <div>
                       <p className="font-medium text-slate-800 text-sm">{c.name}</p>
-                      <p className="text-xs text-slate-500">
-                        {c.character || '通用'} · {c.size} · 数量: {c.quantity}
-                      </p>
+                      <p className="text-xs text-slate-500">{c.character || '通用'} · {c.size} · 数量: {c.quantity}</p>
                     </div>
                   </div>
-                  <Badge variant="warning">使用中</Badge>
+                  <Badge variant="warning">{c.status === 'in_use' ? '使用中' : '已借出'}</Badge>
                 </div>
               ))}
             </div>
           )}
         </Card>
 
-        <Card title="灯光音响检查">
-          <div className="space-y-4">
-            <CheckSection title="灯光设备" items={lightingChecks} onToggle={toggleCheckItem} icon={<ClipboardList className="w-4 h-4" />} />
-            <CheckSection title="音响设备" items={soundChecks} onToggle={toggleCheckItem} icon={<ClipboardList className="w-4 h-4" />} />
-            <CheckSection title="舞台设施" items={stageChecks} onToggle={toggleCheckItem} icon={<ClipboardList className="w-4 h-4" />} />
+        <Card title={<div className="flex items-center gap-2"><Ticket className="w-5 h-5 text-green-500" /><span>票务入场</span></div>}>
+          <div className="space-y-3">
+            {ticketSales.length > 0 && (
+              <div className="grid grid-cols-3 gap-3">
+                <div className="p-3 rounded-lg bg-green-50 text-center">
+                  <p className="text-2xl font-bold text-green-700">{totalTickets}</p>
+                  <p className="text-xs text-green-600">已售票</p>
+                </div>
+                <div className="p-3 rounded-lg bg-amber-50 text-center">
+                  <p className="text-2xl font-bold text-amber-700">{totalComp}</p>
+                  <p className="text-xs text-amber-600">赠票</p>
+                </div>
+                <div className="p-3 rounded-lg bg-blue-50 text-center">
+                  <p className="text-2xl font-bold text-blue-700">{totalAudience}</p>
+                  <p className="text-xs text-blue-600">入场</p>
+                </div>
+              </div>
+            )}
+            {complementaryTickets.length > 0 && (
+              <div>
+                <p className="text-xs text-slate-500 font-medium mb-1">赠票记录</p>
+                {complementaryTickets.map((t) => (
+                  <div key={t.id} className="flex items-center justify-between py-1.5 text-sm">
+                    <span className="text-slate-700">{t.recipient}</span>
+                    <Badge variant="success">{t.quantity} 张 · {t.reason}</Badge>
+                  </div>
+                ))}
+              </div>
+            )}
+            {ticketSales.length === 0 && complementaryTickets.length === 0 && (
+              <p className="text-slate-400 text-center py-4 text-sm">暂无票务数据</p>
+            )}
+          </div>
+        </Card>
+
+        <Card
+          title={<div className="flex items-center gap-2"><MessageSquare className="w-5 h-5 text-slate-500" /><span>演出日志 & 事故</span></div>}
+          rightAction={
+            <div className="flex gap-1">
+              <Button size="sm" variant="ghost" onClick={() => setShowLogModal(true)}>
+                <MessageSquare className="w-3.5 h-3.5" />
+                日志
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setShowIncidentModal(true)}>
+                <AlertTriangle className="w-3.5 h-3.5" />
+                事故
+              </Button>
+            </div>
+          }
+        >
+          <div className="space-y-3">
+            {incidents.filter((i) => !i.handled).length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-red-500">待处理事故</p>
+                {incidents.filter((i) => !i.handled).map((i) => (
+                  <div key={i.id} className="p-3 rounded-lg bg-red-50 border border-red-200">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="font-medium text-red-700 text-sm">{i.title}</span>
+                        <Badge variant={i.severity === 'serious' ? 'danger' : i.severity === 'moderate' ? 'warning' : 'default'} className="ml-2">
+                          {{ minor: '轻微', moderate: '一般', serious: '严重' }[i.severity]}
+                        </Badge>
+                      </div>
+                      <Button size="sm" onClick={() => { setHandleTarget(i.id); setResolution(''); setShowHandleModal(true) }}>
+                        <Check className="w-3.5 h-3.5" />
+                        处理
+                      </Button>
+                    </div>
+                    <p className="text-xs text-red-600 mt-1">{i.description}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+            {logs.length > 0 ? (
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-slate-500">最近日志</p>
+                {[...logs].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).slice(0, 5).map((l) => (
+                  <div key={l.id} className="flex items-start gap-2 py-1.5">
+                    <Badge variant={l.category === 'warning' ? 'warning' : l.category === 'action' ? 'success' : 'info'} className="mt-0.5 flex-shrink-0">
+                      {{ info: '信息', warning: '警告', action: '操作' }[l.category]}
+                    </Badge>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-slate-700">{l.content}</p>
+                      <p className="text-xs text-slate-400 mt-0.5">{formatDateTime(l.timestamp)}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-slate-400 text-center py-4 text-sm">暂无日志</p>
+            )}
           </div>
         </Card>
       </div>
 
-      {event.notes && (
-        <Card title="备注">
-          <p className="text-sm text-slate-600 leading-relaxed">{event.notes}</p>
-        </Card>
-      )}
-
-      <Modal
-        open={showAssignmentModal}
-        onClose={() => setShowAssignmentModal(false)}
-        title="添加排班人员"
-        size="sm"
-        footer={
-          <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => setShowAssignmentModal(false)}>
-              取消
-            </Button>
-            <Button onClick={handleAddAssignment}>添加</Button>
-          </div>
-        }
-      >
+      <Modal open={showAssignmentModal} onClose={() => setShowAssignmentModal(false)} title="添加排班人员" size="sm" footer={
+        <div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => setShowAssignmentModal(false)}>取消</Button><Button onClick={handleAddAssignment}>添加</Button></div>
+      }>
         <div className="space-y-4">
-          <Select
-            label="人员"
-            value={newAssignment.personnelId}
-            onChange={(e) => setNewAssignment({ ...newAssignment, personnelId: e.target.value })}
-            options={[
-              { value: '', label: '请选择' },
-              ...personnel.map((p) => ({ value: p.id, label: p.name })),
-            ]}
-          />
-          <Input
-            label="岗位/角色"
-            value={newAssignment.role}
-            onChange={(e) => setNewAssignment({ ...newAssignment, role: e.target.value })}
-            placeholder="如：男主角、灯光师、场务等"
-          />
+          <Select label="人员" value={newAssignment.personnelId} onChange={(e) => setNewAssignment({ ...newAssignment, personnelId: e.target.value })} options={[{ value: '', label: '请选择' }, ...personnel.map((p) => ({ value: p.id, label: p.name }))]} />
+          <Input label="岗位/角色" value={newAssignment.role} onChange={(e) => setNewAssignment({ ...newAssignment, role: e.target.value })} placeholder="如：男主角、灯光师、场务等" />
         </div>
+      </Modal>
+
+      <Modal open={showLogModal} onClose={() => setShowLogModal(false)} title="记录演出日志" size="md" footer={
+        <div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => setShowLogModal(false)}>取消</Button><Button onClick={handleAddLog}>保存</Button></div>
+      }>
+        <div className="space-y-4">
+          <Select label="日志类型" value={logForm.category} onChange={(e) => setLogForm({ ...logForm, category: e.target.value as PerformanceLog['category'] })} options={[{ value: 'info', label: '信息' }, { value: 'warning', label: '警告' }, { value: 'action', label: '操作' }]} />
+          <TextArea label="日志内容" value={logForm.content} onChange={(e) => setLogForm({ ...logForm, content: e.target.value })} placeholder="记录演出现场发生的事件..." rows={4} />
+        </div>
+      </Modal>
+
+      <Modal open={showIncidentModal} onClose={() => setShowIncidentModal(false)} title="记录事故" size="md" footer={
+        <div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => setShowIncidentModal(false)}>取消</Button><Button variant="danger" onClick={handleAddIncident}>提交</Button></div>
+      }>
+        <div className="space-y-4">
+          <Input label="事故标题" value={incidentForm.title} onChange={(e) => setIncidentForm({ ...incidentForm, title: e.target.value })} placeholder="简要描述事故" />
+          <Select label="严重程度" value={incidentForm.severity} onChange={(e) => setIncidentForm({ ...incidentForm, severity: e.target.value as IncidentRecord['severity'] })} options={[{ value: 'minor', label: '轻微' }, { value: 'moderate', label: '一般' }, { value: 'serious', label: '严重' }]} />
+          <TextArea label="详细描述" value={incidentForm.description} onChange={(e) => setIncidentForm({ ...incidentForm, description: e.target.value })} rows={4} />
+        </div>
+      </Modal>
+
+      <Modal open={showHandleModal} onClose={() => setShowHandleModal(false)} title="处理事故" size="md" footer={
+        <div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => setShowHandleModal(false)}>取消</Button><Button variant="success" onClick={handleResolveIncident}><Check className="w-4 h-4" />确认</Button></div>
+      }>
+        <TextArea label="处理结果" value={resolution} onChange={(e) => setResolution(e.target.value)} placeholder="描述处理方式和结果..." rows={4} />
       </Modal>
     </div>
   )
 }
 
-function CheckSection({
-  title,
-  items,
-  onToggle,
-  icon,
-}: {
-  title: string
-  items: any[]
-  onToggle: (id: string) => void
-  icon: React.ReactNode
-}) {
+function MiniStat({ label, value, icon }: { label: string; value: string | number; icon: React.ReactNode }) {
+  return (
+    <Card>
+      <div className="flex items-center gap-3">
+        <div className="p-2 rounded-lg bg-slate-50">{icon}</div>
+        <div>
+          <p className="text-xs text-slate-500">{label}</p>
+          <p className="text-lg font-bold text-slate-800">{value}</p>
+        </div>
+      </div>
+    </Card>
+  )
+}
+
+function CheckSection({ title, items, onToggle }: { title: string; items: CheckItem[]; onToggle: (id: string) => void }) {
   const checked = items.filter((i) => i.checked).length
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
-          {icon}
-          {title}
-        </div>
-        <span className="text-xs text-slate-500">
-          {checked}/{items.length}
-        </span>
+        <span className="text-sm font-medium text-slate-700">{title}</span>
+        <span className="text-xs text-slate-500">{checked}/{items.length}</span>
       </div>
       <div className="space-y-1.5">
         {items.map((item) => (
-          <label
-            key={item.id}
-            className="flex items-center gap-3 p-2.5 rounded-lg hover:bg-slate-50 cursor-pointer"
-          >
-            <input
-              type="checkbox"
-              checked={item.checked}
-              onChange={() => onToggle(item.id)}
-              className="w-4 h-4 rounded border-slate-300 text-amber-500 focus:ring-amber-500"
-            />
-            <span className={cn('text-sm', item.checked ? 'text-slate-400 line-through' : 'text-slate-700')}>
-              {item.name}
-            </span>
+          <label key={item.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-slate-50 cursor-pointer">
+            <input type="checkbox" checked={item.checked} onChange={() => onToggle(item.id)} className="w-4 h-4 rounded border-slate-300 text-amber-500 focus:ring-amber-500" />
+            <span className={cn('text-sm', item.checked ? 'text-slate-400 line-through' : 'text-slate-700')}>{item.name}</span>
           </label>
         ))}
       </div>

@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import {
   addMonths,
   subMonths,
@@ -12,6 +12,7 @@ import {
   format,
   parseISO,
   addDays,
+  differenceInDays,
   isWithinInterval,
 } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
@@ -23,14 +24,20 @@ import {
   AlertTriangle,
   Trash2,
   Edit2,
+  MapPin,
+  Users,
+  Package,
+  Shirt,
+  X,
 } from 'lucide-react'
 import {
   DndContext,
   DragOverlay,
-  closestCenter,
   PointerSensor,
   useSensor,
   useSensors,
+  useDroppable,
+  useDraggable,
   type DragStartEvent,
   type DragEndEvent,
 } from '@dnd-kit/core'
@@ -43,7 +50,7 @@ import Input from '../components/Input'
 import Select from '../components/Select'
 import TextArea from '../components/TextArea'
 import type { ScheduleEvent, EventType } from '../types'
-import { cn, formatDateTime } from '../lib/utils'
+import { cn, formatDateTime, formatTime, formatDate } from '../lib/utils'
 import { useNavigate } from 'react-router-dom'
 
 const eventTypeLabels: Record<EventType, string> = {
@@ -60,19 +67,257 @@ const eventTypeColors: Record<EventType, string> = {
   teardown: 'event-teardown',
 }
 
-function checkConflict(newEvent: ScheduleEvent, allEvents: ScheduleEvent[]): ScheduleEvent[] {
-  return allEvents.filter((e) => {
-    if (e.id === newEvent.id) return false
-    const newStart = parseISO(newEvent.start)
-    const newEnd = parseISO(newEvent.end)
-    const eStart = parseISO(e.start)
-    const eEnd = parseISO(e.end)
-    return (
-      isWithinInterval(newStart, { start: eStart, end: eEnd }) ||
-      isWithinInterval(newEnd, { start: eStart, end: eEnd }) ||
-      isWithinInterval(eStart, { start: newStart, end: newEnd })
-    )
+const eventTypeBadge: Record<EventType, 'danger' | 'info' | 'success' | 'purple'> = {
+  show: 'danger',
+  rehearsal: 'info',
+  setup: 'success',
+  teardown: 'purple',
+}
+
+export interface ConflictDetail {
+  type: 'venue' | 'personnel' | 'prop' | 'costume'
+  label: string
+  resourceId: string
+  resourceName: string
+  conflictingEventId: string
+  conflictingEventTitle: string
+}
+
+export interface ConflictResult {
+  eventId: string
+  timeConflicts: string[]
+  details: ConflictDetail[]
+}
+
+function timeOverlaps(a: ScheduleEvent, b: ScheduleEvent): boolean {
+  const aStart = parseISO(a.start).getTime()
+  const aEnd = parseISO(a.end).getTime()
+  const bStart = parseISO(b.start).getTime()
+  const bEnd = parseISO(b.end).getTime()
+  return aStart < bEnd && bStart < aEnd
+}
+
+function detectConflicts(
+  targetEvent: ScheduleEvent,
+  allEvents: ScheduleEvent[],
+  assignments: { eventId: string; personnelId: string; role: string }[],
+  props: { id: string; name: string; status: string; borrowerId?: string }[],
+  costumes: { id: string; name: string; status: string; borrowerId?: string }[],
+  personnel: { id: string; name: string }[],
+): ConflictResult {
+  const result: ConflictResult = {
+    eventId: targetEvent.id,
+    timeConflicts: [],
+    details: [],
+  }
+
+  const overlapping = allEvents.filter(
+    (e) => e.id !== targetEvent.id && timeOverlaps(targetEvent, e),
+  )
+  result.timeConflicts = overlapping.map((e) => e.id)
+
+  for (const other of overlapping) {
+    if (
+      targetEvent.venue &&
+      other.venue &&
+      targetEvent.venue === other.venue
+    ) {
+      result.details.push({
+        type: 'venue',
+        label: '场地冲突',
+        resourceId: targetEvent.venue,
+        resourceName: targetEvent.venue,
+        conflictingEventId: other.id,
+        conflictingEventTitle: other.title,
+      })
+    }
+
+    const targetPersonnel = assignments
+      .filter((a) => a.eventId === targetEvent.id)
+      .map((a) => a.personnelId)
+    const otherPersonnel = assignments
+      .filter((a) => a.eventId === other.id)
+      .map((a) => a.personnelId)
+    for (const pid of targetPersonnel) {
+      if (otherPersonnel.includes(pid)) {
+        const p = personnel.find((x) => x.id === pid)
+        result.details.push({
+          type: 'personnel',
+          label: '人员冲突',
+          resourceId: pid,
+          resourceName: p?.name || '未知',
+          conflictingEventId: other.id,
+          conflictingEventTitle: other.title,
+        })
+      }
+    }
+
+    const targetPropIds = props
+      .filter((p) => p.status === 'in_use' || p.status === 'borrowed')
+      .map((p) => p.id)
+    const otherPropIds = props
+      .filter((p) => p.status === 'in_use' || p.status === 'borrowed')
+      .map((p) => p.id)
+    for (const propId of targetPropIds) {
+      if (otherPropIds.includes(propId)) {
+        const p = props.find((x) => x.id === propId)
+        result.details.push({
+          type: 'prop',
+          label: '道具冲突',
+          resourceId: propId,
+          resourceName: p?.name || '未知',
+          conflictingEventId: other.id,
+          conflictingEventTitle: other.title,
+        })
+      }
+    }
+
+    const targetCostumeIds = costumes
+      .filter((c) => c.status === 'in_use' || c.status === 'borrowed')
+      .map((c) => c.id)
+    const otherCostumeIds = costumes
+      .filter((c) => c.status === 'in_use' || c.status === 'borrowed')
+      .map((c) => c.id)
+    for (const costumeId of targetCostumeIds) {
+      if (otherCostumeIds.includes(costumeId)) {
+        const c = costumes.find((x) => x.id === costumeId)
+        result.details.push({
+          type: 'costume',
+          label: '服装冲突',
+          resourceId: costumeId,
+          resourceName: c?.name || '未知',
+          conflictingEventId: other.id,
+          conflictingEventTitle: other.title,
+        })
+      }
+    }
+  }
+
+  const seen = new Set<string>()
+  result.details = result.details.filter((d) => {
+    const key = `${d.type}-${d.resourceId}-${d.conflictingEventId}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
   })
+
+  return result
+}
+
+function DraggableEvent({
+  event,
+  hasConflict,
+  onClick,
+}: {
+  event: ScheduleEvent
+  hasConflict: boolean
+  onClick: () => void
+}) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: event.id,
+    data: { event },
+  })
+
+  return (
+    <div
+      ref={setNodeRef}
+      {...attributes}
+      {...listeners}
+      onClick={(e) => {
+        e.stopPropagation()
+        onClick()
+      }}
+      className={cn(
+        'text-white text-xs px-2 py-1 rounded cursor-grab active:cursor-grabbing truncate hover:opacity-90 transition-opacity',
+        eventTypeColors[event.type],
+        hasConflict && 'conflict-event',
+        isDragging && 'opacity-50 shadow-lg',
+      )}
+      title={`${event.title} - ${formatDateTime(event.start)}`}
+    >
+      <div className="flex items-center gap-1">
+        <span className="font-medium truncate">{event.title}</span>
+        {hasConflict && (
+          <AlertTriangle className="w-3 h-3 flex-shrink-0" />
+        )}
+      </div>
+      <div className="text-[10px] opacity-80">
+        {format(parseISO(event.start), 'HH:mm')} - {format(parseISO(event.end), 'HH:mm')}
+      </div>
+    </div>
+  )
+}
+
+function DroppableDayCell({
+  date,
+  dateKey,
+  isToday,
+  isCurrentMonth,
+  dayEvents,
+  conflicts,
+  onDayClick,
+  onEventClick,
+}: {
+  date: Date
+  dateKey: string
+  isToday: boolean
+  isCurrentMonth: boolean
+  dayEvents: ScheduleEvent[]
+  conflicts: Record<string, ConflictResult>
+  onDayClick: () => void
+  onEventClick: (event: ScheduleEvent) => void
+}) {
+  const { isOver, setNodeRef } = useDroppable({
+    id: dateKey,
+    data: { date },
+  })
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={cn(
+        'min-h-[120px] p-2 border border-slate-100 transition-all cursor-pointer',
+        !isCurrentMonth && 'bg-slate-50/50',
+        isToday && 'bg-amber-50/50',
+        isOver && 'bg-violet-50 border-violet-300 border-dashed',
+        !isOver && 'hover:bg-slate-50',
+      )}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onDayClick()
+      }}
+    >
+      <div className="flex items-center justify-between mb-1">
+        <span
+          className={cn(
+            'text-sm font-medium w-6 h-6 flex items-center justify-center rounded-full',
+            isToday && 'bg-amber-500 text-white',
+            !isCurrentMonth && 'text-slate-300',
+            !isToday && isCurrentMonth && 'text-slate-700',
+          )}
+        >
+          {format(date, 'd')}
+        </span>
+      </div>
+      <div className="space-y-1">
+        {dayEvents.slice(0, 3).map((event) => {
+          const hasConflict =
+            conflicts[event.id] &&
+            (conflicts[event.id].timeConflicts.length > 0 || conflicts[event.id].details.length > 0)
+          return (
+            <DraggableEvent
+              key={event.id}
+              event={event}
+              hasConflict={hasConflict}
+              onClick={() => onEventClick(event)}
+            />
+          )
+        })}
+        {dayEvents.length > 3 && (
+          <div className="text-xs text-slate-500 pl-2">+{dayEvents.length - 3} 更多</div>
+        )}
+      </div>
+    </div>
+  )
 }
 
 export default function CalendarView() {
@@ -80,6 +325,8 @@ export default function CalendarView() {
   const [dragEvent, setDragEvent] = useState<ScheduleEvent | null>(null)
   const [showModal, setShowModal] = useState(false)
   const [editingEvent, setEditingEvent] = useState<ScheduleEvent | null>(null)
+  const [showConflictModal, setShowConflictModal] = useState(false)
+  const [selectedConflictEvent, setSelectedConflictEvent] = useState<ScheduleEvent | null>(null)
   const [formData, setFormData] = useState({
     type: 'show' as EventType,
     title: '',
@@ -92,6 +339,10 @@ export default function CalendarView() {
 
   const events = useAppStore((s) => s.events)
   const shows = useAppStore((s) => s.shows)
+  const assignments = useAppStore((s) => s.assignments)
+  const allProps = useAppStore((s) => s.props)
+  const allCostumes = useAppStore((s) => s.costumes)
+  const personnel = useAppStore((s) => s.personnel)
   const addEvent = useAppStore((s) => s.addEvent)
   const updateEvent = useAppStore((s) => s.updateEvent)
   const deleteEvent = useAppStore((s) => s.deleteEvent)
@@ -110,15 +361,15 @@ export default function CalendarView() {
   const days = eachDayOfInterval({ start: calendarStart, end: calendarEnd })
 
   const conflicts = useMemo(() => {
-    const result: Record<string, string[]> = {}
+    const result: Record<string, ConflictResult> = {}
     events.forEach((e) => {
-      const conf = checkConflict(e, events)
-      if (conf.length > 0) {
-        result[e.id] = conf.map((c) => c.id)
+      const c = detectConflicts(e, events, assignments, allProps, allCostumes, personnel)
+      if (c.timeConflicts.length > 0 || c.details.length > 0) {
+        result[e.id] = c
       }
     })
     return result
-  }, [events])
+  }, [events, assignments, allProps, allCostumes, personnel])
 
   const eventsByDate = useMemo(() => {
     const map: Record<string, ScheduleEvent[]> = {}
@@ -208,28 +459,36 @@ export default function CalendarView() {
   const handleDragEnd = (event: DragEndEvent) => {
     setDragEvent(null)
     if (!event.over || !dragEvent) return
-    const targetDate = new Date(String(event.over.id))
+
+    const targetDateStr = String(event.over.id)
+    const targetDate = parseISO(targetDateStr)
     const originalStart = parseISO(dragEvent.start)
     const originalEnd = parseISO(dragEvent.end)
-    const diffDays = targetDate.getDate() - originalStart.getDate()
-    const diffMonths = targetDate.getMonth() - originalStart.getMonth()
-    const diffYears = targetDate.getFullYear() - originalStart.getFullYear()
+
+    const diffMs = differenceInDays(targetDate, originalStart)
+
     const newStart = new Date(originalStart)
-    newStart.setDate(newStart.getDate() + diffDays)
-    newStart.setMonth(newStart.getMonth() + diffMonths)
-    newStart.setFullYear(newStart.getFullYear() + diffYears)
+    newStart.setDate(newStart.getDate() + diffMs)
     const newEnd = new Date(originalEnd)
-    newEnd.setDate(newEnd.getDate() + diffDays)
-    newEnd.setMonth(newEnd.getMonth() + diffMonths)
-    newEnd.setFullYear(newEnd.getFullYear() + diffYears)
+    newEnd.setDate(newEnd.getDate() + diffMs)
+
     updateEvent(dragEvent.id, {
       start: newStart.toISOString(),
       end: newEnd.toISOString(),
     })
   }
 
+  const openConflictDetail = (event: ScheduleEvent) => {
+    setSelectedConflictEvent(event)
+    setShowConflictModal(true)
+  }
+
   const weekDays = ['一', '二', '三', '四', '五', '六', '日']
-  const conflictCount = Object.keys(conflicts).length
+  const totalConflicts = Object.keys(conflicts).length
+  const totalDetailCount = Object.values(conflicts).reduce(
+    (sum, c) => sum + c.details.length,
+    0,
+  )
 
   return (
     <div className="space-y-6">
@@ -239,11 +498,21 @@ export default function CalendarView() {
           <p className="text-sm text-slate-500 mt-1">拖拽事件可快速调整日期，点击可查看详情</p>
         </div>
         <div className="flex items-center gap-3">
-          {conflictCount > 0 && (
-            <Badge variant="danger">
-              <AlertTriangle className="w-3 h-3 mr-1" />
-              {conflictCount} 个时间冲突
-            </Badge>
+          {totalDetailCount > 0 && (
+            <button
+              onClick={() => {
+                if (totalConflicts > 0) {
+                  const firstConflictEvent = events.find((e) => conflicts[e.id])
+                  if (firstConflictEvent) openConflictDetail(firstConflictEvent)
+                }
+              }}
+              className="cursor-pointer"
+            >
+              <Badge variant="danger">
+                <AlertTriangle className="w-3 h-3 mr-1" />
+                {totalDetailCount} 项冲突
+              </Badge>
+            </button>
           )}
           <Button onClick={() => openNewEvent()}>
             <Plus className="w-4 h-4" />
@@ -292,7 +561,6 @@ export default function CalendarView() {
 
         <DndContext
           sensors={sensors}
-          collisionDetection={closestCenter}
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
         >
@@ -313,66 +581,24 @@ export default function CalendarView() {
               const isCurrentMonth = isSameMonth(day, currentDate)
 
               return (
-                <div
+                <DroppableDayCell
                   key={key}
-                  data-date={key}
-                  id={day.toISOString()}
-                  className={cn(
-                    'min-h-[120px] p-2 border border-slate-100 transition-all cursor-pointer hover:bg-slate-50',
-                    !isCurrentMonth && 'bg-slate-50/50',
-                    isToday && 'bg-amber-50/50',
-                  )}
-                  onClick={(e) => {
-                    if (e.target === e.currentTarget) openNewEvent(day)
+                  date={day}
+                  dateKey={key}
+                  isToday={isToday}
+                  isCurrentMonth={isCurrentMonth}
+                  dayEvents={dayEvents}
+                  conflicts={conflicts}
+                  onDayClick={() => openNewEvent(day)}
+                  onEventClick={(event) => {
+                    const c = conflicts[event.id]
+                    if (c && (c.timeConflicts.length > 0 || c.details.length > 0)) {
+                      openConflictDetail(event)
+                    } else {
+                      openEditEvent(event)
+                    }
                   }}
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <span
-                      className={cn(
-                        'text-sm font-medium w-6 h-6 flex items-center justify-center rounded-full',
-                        isToday && 'bg-amber-500 text-white',
-                        !isCurrentMonth && 'text-slate-300',
-                        !isToday && isCurrentMonth && 'text-slate-700',
-                      )}
-                    >
-                      {format(day, 'd')}
-                    </span>
-                  </div>
-                  <div className="space-y-1">
-                    {dayEvents.slice(0, 3).map((event) => (
-                      <div
-                        key={event.id}
-                        draggable
-                        data-id={event.id}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          openEditEvent(event)
-                        }}
-                        className={cn(
-                          'text-white text-xs px-2 py-1 rounded cursor-move truncate hover:opacity-90 transition-opacity',
-                          eventTypeColors[event.type],
-                          conflicts[event.id]?.length > 0 && 'conflict-event',
-                        )}
-                        title={`${event.title} - ${formatDateTime(event.start)}`}
-                      >
-                        <div className="flex items-center gap-1">
-                          <span className="font-medium truncate">{event.title}</span>
-                          {conflicts[event.id]?.length > 0 && (
-                            <AlertTriangle className="w-3 h-3 flex-shrink-0" />
-                          )}
-                        </div>
-                        <div className="text-[10px] opacity-80">
-                          {format(parseISO(event.start), 'HH:mm')}
-                        </div>
-                      </div>
-                    ))}
-                    {dayEvents.length > 3 && (
-                      <div className="text-xs text-slate-500 pl-2">
-                        +{dayEvents.length - 3} 更多
-                      </div>
-                    )}
-                  </div>
-                </div>
+                />
               )
             })}
           </div>
@@ -381,12 +607,14 @@ export default function CalendarView() {
             {dragEvent && (
               <div
                 className={cn(
-                  'text-white text-sm px-3 py-2 rounded shadow-xl',
+                  'text-white text-sm px-3 py-2 rounded-lg shadow-2xl opacity-90',
                   eventTypeColors[dragEvent.type],
                 )}
               >
                 <div className="font-medium">{dragEvent.title}</div>
-                <div className="text-xs opacity-80">{formatDateTime(dragEvent.start)}</div>
+                <div className="text-xs opacity-80">
+                  {format(parseISO(dragEvent.start), 'HH:mm')} - {format(parseISO(dragEvent.end), 'HH:mm')}
+                </div>
               </div>
             )}
           </DragOverlay>
@@ -498,10 +726,136 @@ export default function CalendarView() {
               onClick={() => navigate(`/events/${editingEvent.id}`)}
             >
               <Edit2 className="w-4 h-4" />
-              查看完整详情
+              进入执行面板
             </Button>
           )}
         </div>
+      </Modal>
+
+      <Modal
+        open={showConflictModal}
+        onClose={() => setShowConflictModal(false)}
+        title="冲突详情"
+        size="lg"
+        footer={
+          <div className="flex justify-end gap-2">
+            {selectedConflictEvent && (
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setShowConflictModal(false)
+                  openEditEvent(selectedConflictEvent)
+                }}
+              >
+                编辑排期
+              </Button>
+            )}
+            <Button onClick={() => setShowConflictModal(false)}>关闭</Button>
+          </div>
+        }
+      >
+        {selectedConflictEvent && (() => {
+          const c = conflicts[selectedConflictEvent.id]
+          if (!c) return <p className="text-slate-400 text-center py-8">无冲突</p>
+
+          const grouped: Record<string, ConflictDetail[]> = {}
+          c.details.forEach((d) => {
+            if (!grouped[d.type]) grouped[d.type] = []
+            grouped[d.type].push(d)
+          })
+
+          const typeIcons: Record<string, React.ReactNode> = {
+            venue: <MapPin className="w-4 h-4 text-red-500" />,
+            personnel: <Users className="w-4 h-4 text-blue-500" />,
+            prop: <Package className="w-4 h-4 text-amber-500" />,
+            costume: <Shirt className="w-4 h-4 text-purple-500" />,
+          }
+          const typeLabels: Record<string, string> = {
+            venue: '场地冲突',
+            personnel: '人员冲突',
+            prop: '道具冲突',
+            costume: '服装冲突',
+          }
+
+          return (
+            <div className="space-y-4">
+              <div className="p-4 rounded-xl bg-red-50 border border-red-200">
+                <div className="flex items-center gap-2 mb-1">
+                  <AlertTriangle className="w-5 h-5 text-red-500" />
+                  <span className="font-semibold text-red-700">{selectedConflictEvent.title}</span>
+                </div>
+                <p className="text-sm text-red-600">
+                  {formatDateTime(selectedConflictEvent.start)} - {formatTime(selectedConflictEvent.end)}
+                  {selectedConflictEvent.venue && ` · ${selectedConflictEvent.venue}`}
+                </p>
+                <p className="text-sm text-red-500 mt-1">
+                  共 {c.timeConflicts.length} 个时间重叠，{c.details.length} 项资源冲突
+                </p>
+              </div>
+
+              {Object.entries(grouped).map(([type, items]) => (
+                <div key={type} className="space-y-2">
+                  <div className="flex items-center gap-2 font-medium text-slate-700">
+                    {typeIcons[type]}
+                    {typeLabels[type]}
+                    <Badge variant={type === 'venue' ? 'danger' : type === 'personnel' ? 'info' : type === 'prop' ? 'warning' : 'purple'}>
+                      {items.length} 项
+                    </Badge>
+                  </div>
+                  <div className="space-y-1.5 ml-6">
+                    {items.map((item, idx) => {
+                      const otherEvent = events.find((e) => e.id === item.conflictingEventId)
+                      return (
+                        <div
+                          key={`${item.type}-${item.resourceId}-${item.conflictingEventId}-${idx}`}
+                          className="flex items-center justify-between p-3 rounded-lg bg-slate-50 border border-slate-200"
+                        >
+                          <div className="flex items-center gap-3">
+                            <span className="font-medium text-slate-800 text-sm">{item.resourceName}</span>
+                            <span className="text-xs text-slate-500">与</span>
+                            <button
+                              onClick={() => {
+                                if (otherEvent) {
+                                  setSelectedConflictEvent(otherEvent)
+                                }
+                              }}
+                              className="text-sm text-blue-600 hover:underline font-medium"
+                            >
+                              {item.conflictingEventTitle}
+                            </button>
+                          </div>
+                          {otherEvent && (
+                            <span className="text-xs text-slate-400">
+                              {formatDateTime(otherEvent.start)} - {formatTime(otherEvent.end)}
+                              {otherEvent.venue && ` · ${otherEvent.venue}`}
+                            </span>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              ))}
+
+              {c.timeConflicts.length > 0 && c.details.length === 0 && (
+                <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-700">
+                  仅存在时间重叠，暂无场地/人员/物资占用冲突
+                </div>
+              )}
+
+              <div className="flex gap-2 pt-2 border-t border-slate-100">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => navigate(`/events/${selectedConflictEvent.id}`)}
+                >
+                  <Edit2 className="w-3.5 h-3.5" />
+                  进入执行面板
+                </Button>
+              </div>
+            </div>
+          )
+        })()}
       </Modal>
     </div>
   )

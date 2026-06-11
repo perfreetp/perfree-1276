@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react'
+import { parseISO, isWithinInterval } from 'date-fns'
 import {
   DollarSign,
   FileDown,
@@ -11,6 +12,7 @@ import {
   Download,
   TrendingUp,
   TrendingDown,
+  Package,
 } from 'lucide-react'
 import {
   PieChart,
@@ -33,7 +35,7 @@ import Input from '../components/Input'
 import Select from '../components/Select'
 import Modal from '../components/Modal'
 import TextArea from '../components/TextArea'
-import { cn, formatDate, exportToCSV } from '../lib/utils'
+import { cn, formatDate, formatDateTime, formatTime, exportToCSV } from '../lib/utils'
 import type { TodoItem } from '../types'
 
 const todoPriorityLabels: Record<TodoItem['priority'], string> = {
@@ -584,6 +586,126 @@ function TodoList() {
 
 function DataExport() {
   const state = useAppStore()
+  const [selectedEventId, setSelectedEventId] = useState('')
+
+  const handleExportPack = () => {
+    if (!selectedEventId) return
+    const event = state.events.find((e) => e.id === selectedEventId)
+    if (!event) return
+
+    const eventName = event.title.replace(/[《》]/g, '')
+    const dateStr = formatDate(event.start)
+
+    const scheduleData = [{
+      类型: { show: '演出', rehearsal: '排练', setup: '装台', teardown: '撤场' }[event.type],
+      标题: event.title,
+      开始时间: formatDateTime(event.start),
+      结束时间: formatTime(event.end),
+      场地: event.venue || '',
+      备注: event.description || '',
+    }]
+    exportToCSV(scheduleData, `${eventName}_${dateStr}_排期.csv`)
+
+    const assignments = state.assignments.filter((a) => a.eventId === selectedEventId)
+    if (assignments.length > 0) {
+      const personnelData = assignments.map((a) => {
+        const p = state.personnel.find((per) => per.id === a.personnelId)
+        const onLeave = p && state.leaves.some(
+          (l) =>
+            l.status !== 'rejected' &&
+            l.personnelId === p.id &&
+            isWithinInterval(parseISO(event.start), {
+              start: parseISO(l.startDate),
+              end: new Date(parseISO(l.endDate).getTime() + 86400000),
+            }),
+        )
+        return {
+          姓名: p?.name || '未知',
+          岗位: a.role,
+          是否请假: onLeave ? '是' : '否',
+        }
+      })
+      exportToCSV(personnelData, `${eventName}_${dateStr}_人员.csv`)
+    }
+
+    const propsInUse = state.props.filter((p) => p.status === 'in_use' || p.status === 'borrowed')
+    if (propsInUse.length > 0) {
+      const propsData = propsInUse.map((p) => ({
+        名称: p.name,
+        分类: p.category,
+        数量: p.quantity,
+        状态: { in_stock: '在库', in_use: '使用中', borrowed: '已借出', maintenance: '维护中' }[p.status],
+        位置: p.location || '',
+      }))
+      exportToCSV(propsData, `${eventName}_${dateStr}_道具.csv`)
+    }
+
+    const costumesInUse = state.costumes.filter((c) => c.status === 'in_use' || c.status === 'borrowed')
+    if (costumesInUse.length > 0) {
+      const costumesData = costumesInUse.map((c) => ({
+        名称: c.name,
+        角色: c.character || '',
+        尺码: c.size,
+        数量: c.quantity,
+        状态: { in_stock: '在库', in_use: '使用中', borrowed: '已借出', cleaning: '清洗中' }[c.status],
+      }))
+      exportToCSV(costumesData, `${eventName}_${dateStr}_服装.csv`)
+    }
+
+    const eventTickets = state.ticketSales.filter((t) => t.eventId === selectedEventId)
+    const eventComp = state.complementaryTickets.filter((t) => t.eventId === selectedEventId)
+    if (eventTickets.length > 0 || eventComp.length > 0) {
+      const ticketData = [
+        ...eventTickets.map((t) => ({
+          类型: '售票',
+          票种: ({ normal: '普通票', vip: 'VIP票', student: '学生票', complementary: '赠票' } as Record<string, string>)[t.type],
+          数量: t.quantity,
+          单价: t.price,
+          总价: t.total,
+        })),
+        ...eventComp.map((t) => ({
+          类型: '赠票',
+          票种: '赠票',
+          数量: t.quantity,
+          单价: 0,
+          总价: 0,
+          受赠方: t.recipient,
+          事由: t.reason,
+        })),
+      ]
+      exportToCSV(ticketData as any[], `${eventName}_${dateStr}_票务.csv`)
+    }
+
+    const checksData = state.checkItems.map((c) => ({
+      分类: ({ lighting: '灯光', sound: '音响', stage: '舞台', other: '其他' } as Record<string, string>)[c.category],
+      检查项: c.name,
+      状态: c.checked ? '✓ 已检查' : '✗ 未检查',
+    }))
+    exportToCSV(checksData, `${eventName}_${dateStr}_检查清单.csv`)
+
+    const eventLogs = state.logs.filter((l) => l.eventId === selectedEventId)
+    if (eventLogs.length > 0) {
+      const logsData = eventLogs.map((l) => ({
+        时间: formatDateTime(l.timestamp),
+        类型: ({ info: '信息', warning: '警告', action: '操作' } as Record<string, string>)[l.category],
+        内容: l.content,
+      }))
+      exportToCSV(logsData, `${eventName}_${dateStr}_日志.csv`)
+    }
+
+    const eventIncidents = state.incidents.filter((i) => i.eventId === selectedEventId)
+    if (eventIncidents.length > 0) {
+      const incidentsData = eventIncidents.map((i) => ({
+        时间: formatDateTime(i.timestamp),
+        标题: i.title,
+        严重程度: { minor: '轻微', moderate: '一般', serious: '严重' }[i.severity],
+        描述: i.description,
+        状态: i.handled ? '已处理' : '待处理',
+        处理结果: i.resolution || '',
+      }))
+      exportToCSV(incidentsData, `${eventName}_${dateStr}_事故记录.csv`)
+    }
+  }
 
   const exportOptions = [
     {
@@ -693,31 +815,108 @@ function DataExport() {
   ]
 
   return (
-    <Card
-      title="数据导出"
-      subtitle="支持将各类数据导出为 CSV 格式，可用 Excel 打开"
-    >
-      <div className="grid grid-cols-2 gap-4">
-        {exportOptions.map((opt) => (
-          <div
-            key={opt.key}
-            className="flex items-center justify-between p-4 rounded-xl border border-slate-200 hover:border-amber-300 hover:bg-amber-50/30 transition-all"
-          >
-            <div>
-              <h4 className="font-semibold text-slate-800">{opt.label}</h4>
-              <p className="text-sm text-slate-500 mt-0.5">{opt.description}</p>
-              <p className="text-xs text-slate-400 mt-1">共 {opt.data.length} 条记录</p>
-            </div>
-            <Button
-              size="sm"
-              onClick={() => exportToCSV(opt.data, `${opt.label}_${formatDate(new Date())}.csv`)}
-            >
-              <Download className="w-4 h-4" />
-              导出
-            </Button>
+    <div className="space-y-6">
+      <Card
+        title={
+          <div className="flex items-center gap-2">
+            <Package className="w-5 h-5 text-amber-500" />
+            <span>场次执行包导出</span>
           </div>
-        ))}
-      </div>
-    </Card>
+        }
+        subtitle="选择一个场次，一键导出排期、人员、物资、票务、清单和日志"
+      >
+        <div className="flex items-end gap-4">
+          <div className="flex-1 max-w-md">
+            <Select
+              label="选择场次"
+              value={selectedEventId}
+              onChange={(e) => setSelectedEventId(e.target.value)}
+              options={[
+                { value: '', label: '请选择场次...' },
+                ...state.events
+                  .slice()
+                  .sort((a, b) => new Date(b.start).getTime() - new Date(a.start).getTime())
+                  .map((e) => ({
+                    value: e.id,
+                    label: `${e.title}（${formatDateTime(e.start)}）`,
+                  })),
+              ]}
+            />
+          </div>
+          <Button
+            onClick={handleExportPack}
+            disabled={!selectedEventId}
+          >
+            <Download className="w-4 h-4" />
+            导出执行包
+          </Button>
+        </div>
+        {selectedEventId && (() => {
+          const ev = state.events.find((e) => e.id === selectedEventId)
+          if (!ev) return null
+          const eventAssignments = state.assignments.filter((a) => a.eventId === selectedEventId)
+          const eventTickets = state.ticketSales.filter((t) => t.eventId === selectedEventId)
+          const eventComp = state.complementaryTickets.filter((t) => t.eventId === selectedEventId)
+          const eventLogs = state.logs.filter((l) => l.eventId === selectedEventId)
+          const eventIncidents = state.incidents.filter((i) => i.eventId === selectedEventId)
+          const propsInUse = state.props.filter((p) => p.status === 'in_use' || p.status === 'borrowed')
+          const costumesInUse = state.costumes.filter((c) => c.status === 'in_use' || c.status === 'borrowed')
+          const packItems = [
+            { label: '排期信息', count: 1 },
+            { label: '人员排班', count: eventAssignments.length },
+            { label: '道具清单', count: propsInUse.length },
+            { label: '服装清单', count: costumesInUse.length },
+            { label: '票务数据', count: eventTickets.length + eventComp.length },
+            { label: '检查清单', count: state.checkItems.length },
+            { label: '演出日志', count: eventLogs.length },
+            { label: '事故记录', count: eventIncidents.length },
+          ]
+          return (
+            <div className="mt-4 p-4 rounded-xl bg-amber-50/50 border border-amber-200">
+              <p className="text-sm font-medium text-amber-800 mb-3">
+                即将导出「{ev.title}」的执行包，包含以下内容：
+              </p>
+              <div className="grid grid-cols-4 gap-2">
+                {packItems.map((item) => (
+                  <div key={item.label} className="flex items-center justify-between px-3 py-2 rounded-lg bg-white text-sm">
+                    <span className="text-slate-600">{item.label}</span>
+                    <span className={cn('font-medium', item.count > 0 ? 'text-amber-600' : 'text-slate-300')}>
+                      {item.count} 条
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )
+        })()}
+      </Card>
+
+      <Card
+        title="分类数据导出"
+        subtitle="支持将各类数据导出为 CSV 格式，可用 Excel 打开"
+      >
+        <div className="grid grid-cols-2 gap-4">
+          {exportOptions.map((opt) => (
+            <div
+              key={opt.key}
+              className="flex items-center justify-between p-4 rounded-xl border border-slate-200 hover:border-amber-300 hover:bg-amber-50/30 transition-all"
+            >
+              <div>
+                <h4 className="font-semibold text-slate-800">{opt.label}</h4>
+                <p className="text-sm text-slate-500 mt-0.5">{opt.description}</p>
+                <p className="text-xs text-slate-400 mt-1">共 {opt.data.length} 条记录</p>
+              </div>
+              <Button
+                size="sm"
+                onClick={() => exportToCSV(opt.data, `${opt.label}_${formatDate(new Date())}.csv`)}
+              >
+                <Download className="w-4 h-4" />
+                导出
+              </Button>
+            </div>
+          ))}
+        </div>
+      </Card>
+    </div>
   )
 }
